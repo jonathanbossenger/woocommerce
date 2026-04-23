@@ -156,6 +156,8 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$this->assertArrayHasKey( 'object_type', $context, 'Context should contain object_type for a WC_Order' );
 		$this->assertArrayHasKey( 'object_id', $context, 'Context should contain object_id for a WC_Order' );
 		$this->assertSame( (int) $order->get_id(), $context['object_id'] );
+
+		$order->delete( true );
 	}
 
 	/**
