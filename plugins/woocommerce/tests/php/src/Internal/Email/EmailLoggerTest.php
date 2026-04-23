@@ -198,12 +198,12 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	 * @return \WC_Email
 	 */
 	private function create_mock_email( string $email_id, string $recipient, $object = false ): \WC_Email {
-		$email            = $this->getMockBuilder( \WC_Email::class )
+		$email         = $this->getMockBuilder( \WC_Email::class )
 			->disableOriginalConstructor()
 			->getMock();
-		$email->id        = $email_id;
-		$email->object    = $object;
-		$email->method( 'get_recipient' )->willReturn( $recipient );
+		$email->id     = $email_id;
+		$email->object = $object;
+		$email->expects( $this->any() )->method( 'get_recipient' )->willReturn( $recipient );
 
 		return $email;
 	}
