@@ -38,9 +38,9 @@ class EmailLogger implements RegisterHooksInterface {
 	/**
 	 * Handle the woocommerce_email_sent action.
 	 *
-	 * @param bool      $success  Whether the email was sent successfully.
-	 * @param string    $email_id The email type ID (e.g. `customer_processing_order`).
-	 * @param WC_Email  $email    The WC_Email instance.
+	 * @param bool     $success  Whether the email was sent successfully.
+	 * @param string   $email_id The email type ID (e.g. `customer_processing_order`).
+	 * @param WC_Email $email    The WC_Email instance.
 	 * @return void
 	 */
 	public function handle_woocommerce_email_sent( $success, string $email_id, WC_Email $email ): void {
@@ -51,16 +51,16 @@ class EmailLogger implements RegisterHooksInterface {
 		 *
 		 * @since 10.8.0
 		 *
-		 * @param bool      $enabled  Whether logging is enabled.
-		 * @param string    $email_id The email type ID.
-		 * @param WC_Email  $email    The WC_Email instance.
+		 * @param bool     $enabled  Whether logging is enabled.
+		 * @param string   $email_id The email type ID.
+		 * @param WC_Email $email    The WC_Email instance.
 		 */
 		if ( ! apply_filters( 'woocommerce_email_log_enabled', true, $email_id, $email ) ) {
 			return;
 		}
 
-		$status  = $success ? 'sent' : 'failed';
 		// Log message is intentionally not translated for consistency with class-wc-emails.php.
+		$status  = $success ? 'sent' : 'failed';
 		$message = sprintf( 'Email "%s" %s.', $email_id, $success ? 'sent' : 'failed to send' );
 
 		$context = array(
@@ -83,9 +83,9 @@ class EmailLogger implements RegisterHooksInterface {
 		 *
 		 * @since 10.8.0
 		 *
-		 * @param array     $context  The context array to be logged.
-		 * @param string    $email_id The email type ID.
-		 * @param WC_Email  $email    The WC_Email instance.
+		 * @param array    $context  The context array to be logged.
+		 * @param string   $email_id The email type ID.
+		 * @param WC_Email $email    The WC_Email instance.
 		 */
 		$context = (array) apply_filters( 'woocommerce_email_log_context', $context, $email_id, $email );
 
@@ -120,30 +120,30 @@ class EmailLogger implements RegisterHooksInterface {
 	 * Returns a stable short `object_type` identifier rather than the raw class name so that
 	 * log aggregation and search are not brittle across subclasses (e.g. `WC_Order_Refund`).
 	 *
-	 * @param mixed $object The email's related object (WC_Order, WC_Product, WP_User, etc.) or false/null.
+	 * @param mixed $wc_object The email's related object (WC_Order, WC_Product, WP_User, etc.) or false/null.
 	 * @return array<string, mixed> Array with `object_type` and optionally `object_id`, or empty when no object is set.
 	 */
-	private function get_object_context( $object ): array {
-		if ( ! is_object( $object ) ) {
+	private function get_object_context( $wc_object ): array {
+		if ( ! is_object( $wc_object ) ) {
 			return array();
 		}
 
-		if ( $object instanceof WC_Order ) {
+		if ( $wc_object instanceof WC_Order ) {
 			$object_type = 'order';
-		} elseif ( $object instanceof WC_Product ) {
+		} elseif ( $wc_object instanceof WC_Product ) {
 			$object_type = 'product';
-		} elseif ( $object instanceof WP_User ) {
+		} elseif ( $wc_object instanceof WP_User ) {
 			$object_type = 'user';
 		} else {
-			$object_type = get_class( $object );
+			$object_type = get_class( $wc_object );
 		}
 
 		$context = array( 'object_type' => $object_type );
 
-		if ( method_exists( $object, 'get_id' ) ) {
-			$context['object_id'] = (int) $object->get_id();
-		} elseif ( property_exists( $object, 'ID' ) ) {
-			$context['object_id'] = (int) $object->ID;
+		if ( method_exists( $wc_object, 'get_id' ) ) {
+			$context['object_id'] = (int) $wc_object->get_id();
+		} elseif ( property_exists( $wc_object, 'ID' ) ) {
+			$context['object_id'] = (int) $wc_object->ID;
 		}
 
 		return $context;

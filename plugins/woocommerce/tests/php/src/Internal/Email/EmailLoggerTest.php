@@ -242,17 +242,17 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	/**
 	 * Create a mock WC_Email object for testing.
 	 *
-	 * @param string     $email_id  Email type ID.
-	 * @param string     $recipient Recipient email address.
-	 * @param mixed      $object    Related WooCommerce object or false.
+	 * @param string $email_id  Email type ID.
+	 * @param string $recipient Recipient email address.
+	 * @param mixed  $wc_object Related WooCommerce object or false.
 	 * @return \WC_Email
 	 */
-	private function create_mock_email( string $email_id, string $recipient, $object = false ): \WC_Email {
+	private function create_mock_email( string $email_id, string $recipient, $wc_object = false ): \WC_Email {
 		$email         = $this->getMockBuilder( \WC_Email::class )
 			->disableOriginalConstructor()
 			->getMock();
 		$email->id     = $email_id;
-		$email->object = $object;
+		$email->object = $wc_object;
 		$email->expects( $this->any() )->method( 'get_recipient' )->willReturn( $recipient );
 
 		return $email;
