@@ -5,7 +5,7 @@
 # For format details, see: https://gh.io/customagents/config
 
 name: "woocommerce-core-dev"
-description: "Use this agent when you need expert guidance on WooCommerce Core development, including writing or reviewing code that extends, integrates with, or modifies WooCommerce; implementing custom payment gateways, shipping methods, or product types; working with WooCommerce hooks, filters, and APIs; debugging WooCommerce-specific issues; optimizing WooCommerce performance; following WooCommerce coding standards and architectural patterns; or migrating/upgrading WooCommerce installations.
+description: "Use this agent when you need expert guidance on WooCommerce Core development, including writing or reviewing code that extends, integrates with, or modifies WooCommerce; implementing custom payment gateways, shipping methods, or product types; working with WooCommerce hooks, filters, and APIs; debugging WooCommerce-specific issues; optimizing WooCommerce performance; following WooCommerce coding standards and architectural patterns; or migrating/upgrading WooCommerce installations."
 ---
 
 # WooCommerce Core Dev
