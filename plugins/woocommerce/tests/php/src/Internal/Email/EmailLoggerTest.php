@@ -4,12 +4,17 @@ declare( strict_types = 1 );
 namespace Automattic\WooCommerce\Tests\Internal\Email;
 
 use Automattic\WooCommerce\Internal\Email\EmailLogger;
+use Automattic\WooCommerce\RestApi\UnitTests\LoggerSpyTrait;
 use WC_Unit_Test_Case;
 
 /**
  * Tests for the EmailLogger class.
+ *
+ * @covers \Automattic\WooCommerce\Internal\Email\EmailLogger
  */
 class EmailLoggerTest extends WC_Unit_Test_Case {
+
+	use LoggerSpyTrait;
 
 	/**
 	 * The System Under Test.
@@ -19,33 +24,20 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	private $sut;
 
 	/**
-	 * Fake logger instance for capturing log calls.
-	 *
-	 * @var object
-	 */
-	private $fake_logger;
-
-	/**
 	 * Set up test fixtures.
 	 */
 	public function setUp(): void {
 		parent::setUp();
-		$this->sut         = new EmailLogger();
-		$this->fake_logger = $this->create_fake_logger();
-
-		add_filter(
-			'woocommerce_logging_class',
-			function () {
-				return $this->fake_logger;
-			}
-		);
+		$this->sut = new EmailLogger();
 	}
 
 	/**
 	 * Tear down test fixtures.
 	 */
 	public function tearDown(): void {
-		remove_all_filters( 'woocommerce_logging_class' );
+		remove_all_filters( 'woocommerce_email_log_enabled' );
+		remove_all_filters( 'woocommerce_email_log_context' );
+		remove_action( 'woocommerce_email_sent', array( $this->sut, 'handle_woocommerce_email_sent' ) );
 		parent::tearDown();
 	}
 
@@ -59,8 +51,6 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 			has_action( 'woocommerce_email_sent', array( $this->sut, 'handle_woocommerce_email_sent' ) ),
 			'Expected hook to be registered for woocommerce_email_sent'
 		);
-
-		remove_action( 'woocommerce_email_sent', array( $this->sut, 'handle_woocommerce_email_sent' ) );
 	}
 
 	/**
@@ -71,8 +61,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 
 		$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
 
-		$this->assertCount( 1, $this->fake_logger->info_calls, 'Expected one info log entry for a successful send' );
-		$this->assertEmpty( $this->fake_logger->warning_calls, 'Expected no warning log entries for a successful send' );
+		$this->assertLogged( 'info', 'customer_processing_order' );
 	}
 
 	/**
@@ -83,27 +72,26 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 
 		$this->sut->handle_woocommerce_email_sent( false, 'customer_processing_order', $email );
 
-		$this->assertCount( 1, $this->fake_logger->warning_calls, 'Expected one warning log entry for a failed send' );
-		$this->assertEmpty( $this->fake_logger->info_calls, 'Expected no info log entries for a failed send' );
+		$this->assertLogged( 'warning', 'customer_processing_order' );
 	}
 
 	/**
-	 * @testdox Log context contains email_id, status, trigger_time, and recipient_hash.
+	 * @testdox Log context contains email_id, status, and recipient_hash.
 	 */
 	public function test_log_context_contains_required_fields(): void {
 		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
 
 		$this->sut->handle_woocommerce_email_sent( true, 'new_order', $email );
 
-		$context = $this->fake_logger->info_calls[0]['context'];
-
-		$this->assertArrayHasKey( 'email_id', $context, 'Context should contain email_id' );
-		$this->assertArrayHasKey( 'status', $context, 'Context should contain status' );
-		$this->assertArrayHasKey( 'trigger_time', $context, 'Context should contain trigger_time' );
-		$this->assertArrayHasKey( 'recipient_hash', $context, 'Context should contain recipient_hash' );
-		$this->assertSame( 'new_order', $context['email_id'] );
-		$this->assertSame( 'sent', $context['status'] );
-		$this->assertSame( 'email-log', $context['source'] );
+		$this->assertLogged(
+			'info',
+			'new_order',
+			array(
+				'source'   => 'email-log',
+				'email_id' => 'new_order',
+				'status'   => 'sent',
+			)
+		);
 	}
 
 	/**
@@ -114,13 +102,11 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 
 		$this->sut->handle_woocommerce_email_sent( false, 'customer_processing_order', $email );
 
-		$context = $this->fake_logger->warning_calls[0]['context'];
-
-		$this->assertSame( 'failed', $context['status'] );
+		$this->assertLogged( 'warning', 'customer_processing_order', array( 'status' => 'failed' ) );
 	}
 
 	/**
-	 * @testdox Recipient email address is stored as an MD5 hash.
+	 * @testdox Recipient email address is stored as a site-salted hash.
 	 */
 	public function test_recipient_is_hashed(): void {
 		$recipient = 'customer@example.com';
@@ -128,12 +114,13 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 
 		$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
 
-		$context = $this->fake_logger->info_calls[0]['context'];
+		$context = $this->captured_logs[0]['context'];
 
+		$this->assertArrayHasKey( 'recipient_hash', $context );
 		$this->assertSame(
-			md5( strtolower( $recipient ) ),
+			wp_hash( strtolower( $recipient ) ),
 			$context['recipient_hash'],
-			'Recipient should be stored as an MD5 hash'
+			'Recipient should be stored as a site-salted hash'
 		);
 		$this->assertStringNotContainsString(
 			$recipient,
@@ -143,21 +130,69 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	}
 
 	/**
-	 * @testdox Object type and ID are included when email has a related WC object.
+	 * @testdox Empty recipient results in an empty recipient_hash.
 	 */
-	public function test_object_context_included_for_wc_order(): void {
-		$order = wc_create_order();
+	public function test_empty_recipient_produces_empty_hash(): void {
+		$email = $this->create_mock_email( 'new_order', '' );
+
+		$this->sut->handle_woocommerce_email_sent( true, 'new_order', $email );
+
+		$context = $this->captured_logs[0]['context'];
+
+		$this->assertSame( '', $context['recipient_hash'], 'Empty recipient should yield an empty recipient_hash' );
+	}
+
+	/**
+	 * @testdox Object type is normalized to a stable short identifier for WC_Order.
+	 */
+	public function test_object_type_normalized_for_order(): void {
+		$order = $this->createMock( \WC_Order::class );
+		$order->method( 'get_id' )->willReturn( 42 );
 		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com', $order );
 
 		$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
 
-		$context = $this->fake_logger->info_calls[0]['context'];
+		$this->assertLogged(
+			'info',
+			'customer_processing_order',
+			array(
+				'object_type' => 'order',
+				'object_id'   => 42,
+			)
+		);
+	}
 
-		$this->assertArrayHasKey( 'object_type', $context, 'Context should contain object_type for a WC_Order' );
-		$this->assertArrayHasKey( 'object_id', $context, 'Context should contain object_id for a WC_Order' );
-		$this->assertSame( (int) $order->get_id(), $context['object_id'] );
+	/**
+	 * @testdox Object type is normalized to a stable short identifier for WC_Product.
+	 */
+	public function test_object_type_normalized_for_product(): void {
+		$product = $this->createMock( \WC_Product::class );
+		$product->method( 'get_id' )->willReturn( 10 );
+		$email = $this->create_mock_email( 'some_product_email', 'customer@example.com', $product );
 
-		$order->delete( true );
+		$this->sut->handle_woocommerce_email_sent( true, 'some_product_email', $email );
+
+		$this->assertLogged( 'info', 'some_product_email', array( 'object_type' => 'product' ) );
+	}
+
+	/**
+	 * @testdox Object type is normalized to a stable short identifier for WP_User.
+	 */
+	public function test_object_type_normalized_for_user(): void {
+		$user     = new \WP_User();
+		$user->ID = 5;
+		$email    = $this->create_mock_email( 'customer_new_account', 'customer@example.com', $user );
+
+		$this->sut->handle_woocommerce_email_sent( true, 'customer_new_account', $email );
+
+		$this->assertLogged(
+			'info',
+			'customer_new_account',
+			array(
+				'object_type' => 'user',
+				'object_id'   => 5,
+			)
+		);
 	}
 
 	/**
@@ -168,27 +203,40 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 
 		$this->sut->handle_woocommerce_email_sent( true, 'customer_new_account', $email );
 
-		$context = $this->fake_logger->info_calls[0]['context'];
+		$context = $this->captured_logs[0]['context'];
 
 		$this->assertArrayNotHasKey( 'object_type', $context, 'Context should not contain object_type when no object is set' );
 		$this->assertArrayNotHasKey( 'object_id', $context, 'Context should not contain object_id when no object is set' );
 	}
 
 	/**
-	 * @testdox Trigger time is recorded in ISO 8601 UTC format.
+	 * @testdox woocommerce_email_log_enabled filter can disable logging entirely.
 	 */
-	public function test_trigger_time_format(): void {
-		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
+	public function test_log_enabled_filter_can_disable_logging(): void {
+		add_filter( 'woocommerce_email_log_enabled', '__return_false' );
 
+		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com' );
+		$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
+
+		$this->assertEmpty( $this->captured_logs, 'No log entry should be written when the enabled filter returns false' );
+	}
+
+	/**
+	 * @testdox woocommerce_email_log_context filter can modify context before logging.
+	 */
+	public function test_log_context_filter_can_modify_context(): void {
+		add_filter(
+			'woocommerce_email_log_context',
+			function ( array $context ) {
+				$context['custom_key'] = 'custom_value';
+				return $context;
+			}
+		);
+
+		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
 		$this->sut->handle_woocommerce_email_sent( true, 'new_order', $email );
 
-		$trigger_time = $this->fake_logger->info_calls[0]['context']['trigger_time'];
-
-		$this->assertMatchesRegularExpression(
-			'/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/',
-			$trigger_time,
-			'trigger_time should be in ISO 8601 UTC format'
-		);
+		$this->assertLogged( 'info', 'new_order', array( 'custom_key' => 'custom_value' ) );
 	}
 
 	/**
@@ -208,82 +256,5 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$email->expects( $this->any() )->method( 'get_recipient' )->willReturn( $recipient );
 
 		return $email;
-	}
-
-	/**
-	 * Create a fake logger that records all log calls.
-	 *
-	 * @return object Anonymous class implementing WC_Logger_Interface.
-	 */
-	private function create_fake_logger(): object {
-		return new class() implements \WC_Logger_Interface {
-			/** @var array */
-			public array $debug_calls = array();
-			/** @var array */
-			public array $info_calls = array();
-			/** @var array */
-			public array $notice_calls = array();
-			/** @var array */
-			public array $warning_calls = array();
-			/** @var array */
-			public array $error_calls = array();
-			/** @var array */
-			public array $critical_calls = array();
-			/** @var array */
-			public array $alert_calls = array();
-			/** @var array */
-			public array $emergency_calls = array();
-
-			public function add( $handle, $message, $level = \WC_Log_Levels::NOTICE ) {}
-			public function debug( $message, $context = array() ) {
-				$this->debug_calls[] = array(
-					'message' => $message,
-					'context' => $context,
-				);
-			}
-			public function info( $message, $context = array() ) {
-				$this->info_calls[] = array(
-					'message' => $message,
-					'context' => $context,
-				);
-			}
-			public function notice( $message, $context = array() ) {
-				$this->notice_calls[] = array(
-					'message' => $message,
-					'context' => $context,
-				);
-			}
-			public function warning( $message, $context = array() ) {
-				$this->warning_calls[] = array(
-					'message' => $message,
-					'context' => $context,
-				);
-			}
-			public function error( $message, $context = array() ) {
-				$this->error_calls[] = array(
-					'message' => $message,
-					'context' => $context,
-				);
-			}
-			public function critical( $message, $context = array() ) {
-				$this->critical_calls[] = array(
-					'message' => $message,
-					'context' => $context,
-				);
-			}
-			public function alert( $message, $context = array() ) {
-				$this->alert_calls[] = array(
-					'message' => $message,
-					'context' => $context,
-				);
-			}
-			public function emergency( $message, $context = array() ) {
-				$this->emergency_calls[] = array(
-					'message' => $message,
-					'context' => $context,
-				);
-			}
-			public function log( $level, $message, $context = array() ) {}
-		};
 	}
 }
