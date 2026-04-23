@@ -1,0 +1,4 @@
+Significance: minor
+Type: add
+
+Add a native WooCommerce transactional email log. Each email send attempt is now recorded in the WooCommerce logs (source: email-log) with the email type, trigger time, related object, hashed recipient, and send status.
