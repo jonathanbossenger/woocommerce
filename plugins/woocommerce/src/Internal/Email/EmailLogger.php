@@ -13,7 +13,7 @@ use WP_User;
 /**
  * Logs transactional email send attempts so store owners can inspect what WooCommerce attempted locally.
  *
- * Records are written to the WooCommerce logger under the `email-log` source and include the email type,
+ * Records are written to the WooCommerce logger under the `transactional-emails` source and include the email type,
  * related object, a hashed recipient identifier, and the local send state.
  *
  * @since 10.8.0
@@ -24,7 +24,7 @@ class EmailLogger implements RegisterHooksInterface {
 	/**
 	 * Logger source used for all email log entries.
 	 */
-	private const LOG_SOURCE = 'email-log';
+	private const LOG_SOURCE = 'transactional-emails';
 
 	/**
 	 * Register hooks.
@@ -60,6 +60,7 @@ class EmailLogger implements RegisterHooksInterface {
 		}
 
 		$status  = $success ? 'sent' : 'failed';
+		// Log message is intentionally not translated for consistency with class-wc-emails.php.
 		$message = sprintf( 'Email "%s" %s.', $email_id, $success ? 'sent' : 'failed to send' );
 
 		$context = array(

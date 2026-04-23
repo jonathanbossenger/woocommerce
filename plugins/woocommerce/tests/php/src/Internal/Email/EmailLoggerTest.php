@@ -87,7 +87,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 			'info',
 			'new_order',
 			array(
-				'source'   => 'email-log',
+				'source'   => 'transactional-emails',
 				'email_id' => 'new_order',
 				'status'   => 'sent',
 			)
