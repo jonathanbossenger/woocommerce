@@ -38,11 +38,12 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		remove_all_filters( 'woocommerce_email_log_enabled' );
 		remove_all_filters( 'woocommerce_email_log_context' );
 		remove_action( 'woocommerce_email_sent', array( $this->sut, 'handle_woocommerce_email_sent' ) );
+		remove_action( 'wp_mail_failed', array( $this->sut, 'capture_mail_error' ) );
 		parent::tearDown();
 	}
 
 	/**
-	 * @testdox Register method adds a hook for woocommerce_email_sent.
+	 * @testdox Register method adds hooks for woocommerce_email_sent and wp_mail_failed.
 	 */
 	public function test_register_adds_hook(): void {
 		$this->sut->register();
@@ -50,6 +51,10 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$this->assertNotFalse(
 			has_action( 'woocommerce_email_sent', array( $this->sut, 'handle_woocommerce_email_sent' ) ),
 			'Expected hook to be registered for woocommerce_email_sent'
+		);
+		$this->assertNotFalse(
+			has_action( 'wp_mail_failed', array( $this->sut, 'capture_mail_error' ) ),
+			'Expected hook to be registered for wp_mail_failed'
 		);
 	}
 
@@ -76,7 +81,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	}
 
 	/**
-	 * @testdox Log context contains email_id, status, and recipient_hash.
+	 * @testdox Log context contains email_type, status, and recipient.
 	 */
 	public function test_log_context_contains_required_fields(): void {
 		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
@@ -87,9 +92,9 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 			'info',
 			'new_order',
 			array(
-				'source'   => 'transactional-emails',
-				'email_id' => 'new_order',
-				'status'   => 'sent',
+				'source'     => 'transactional-emails',
+				'email_type' => 'new_order',
+				'status'     => 'sent',
 			)
 		);
 	}
@@ -106,9 +111,9 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	}
 
 	/**
-	 * @testdox Recipient email address is stored as a site-salted hash.
+	 * @testdox Recipient email address is stored in plain text.
 	 */
-	public function test_recipient_is_hashed(): void {
+	public function test_recipient_is_stored_plain(): void {
 		$recipient = 'customer@example.com';
 		$email     = $this->create_mock_email( 'customer_processing_order', $recipient );
 
@@ -116,30 +121,48 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 
 		$context = $this->captured_logs[0]['context'];
 
-		$this->assertArrayHasKey( 'recipient_hash', $context );
-		$this->assertSame(
-			wp_hash( strtolower( $recipient ) ),
-			$context['recipient_hash'],
-			'Recipient should be stored as a site-salted hash'
-		);
-		$this->assertStringNotContainsString(
-			$recipient,
-			$context['recipient_hash'],
-			'Raw recipient email should not appear in the log context'
-		);
+		$this->assertArrayHasKey( 'recipient', $context );
+		$this->assertSame( $recipient, $context['recipient'], 'Recipient should be stored as the plain email address' );
+		$this->assertArrayNotHasKey( 'recipient_hash', $context, 'recipient_hash key should not be present' );
 	}
 
 	/**
-	 * @testdox Empty recipient results in an empty recipient_hash.
+	 * @testdox Empty recipient results in an empty recipient value.
 	 */
-	public function test_empty_recipient_produces_empty_hash(): void {
+	public function test_empty_recipient_produces_empty_string(): void {
 		$email = $this->create_mock_email( 'new_order', '' );
 
 		$this->sut->handle_woocommerce_email_sent( true, 'new_order', $email );
 
 		$context = $this->captured_logs[0]['context'];
 
-		$this->assertSame( '', $context['recipient_hash'], 'Empty recipient should yield an empty recipient_hash' );
+		$this->assertSame( '', $context['recipient'], 'Empty recipient should yield an empty recipient value' );
+	}
+
+	/**
+	 * @testdox Failure message includes the error reason captured from wp_mail_failed.
+	 */
+	public function test_failure_message_includes_error_reason(): void {
+		$error = new \WP_Error( 'wp_mail_failed', 'SMTP connect() failed' );
+		$this->sut->capture_mail_error( $error );
+
+		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
+		$this->sut->handle_woocommerce_email_sent( false, 'new_order', $email );
+
+		$this->assertLogged( 'warning', 'SMTP connect() failed' );
+	}
+
+	/**
+	 * @testdox Success message does not include an error reason.
+	 */
+	public function test_success_message_has_no_error_reason(): void {
+		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
+		$this->sut->handle_woocommerce_email_sent( true, 'new_order', $email );
+
+		$log = $this->captured_logs[0];
+
+		$this->assertStringContainsString( 'sent', $log['message'] );
+		$this->assertStringNotContainsString( 'failed', $log['message'] );
 	}
 
 	/**
@@ -155,10 +178,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$this->assertLogged(
 			'info',
 			'customer_processing_order',
-			array(
-				'object_type' => 'order',
-				'object_id'   => 42,
-			)
+			array( 'order' => 42 )
 		);
 	}
 
@@ -172,7 +192,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 
 		$this->sut->handle_woocommerce_email_sent( true, 'some_product_email', $email );
 
-		$this->assertLogged( 'info', 'some_product_email', array( 'object_type' => 'product' ) );
+		$this->assertLogged( 'info', 'some_product_email', array( 'product' => 10 ) );
 	}
 
 	/**
@@ -188,10 +208,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$this->assertLogged(
 			'info',
 			'customer_new_account',
-			array(
-				'object_type' => 'user',
-				'object_id'   => 5,
-			)
+			array( 'user' => 5 )
 		);
 	}
 
@@ -205,8 +222,9 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 
 		$context = $this->captured_logs[0]['context'];
 
-		$this->assertArrayNotHasKey( 'object_type', $context, 'Context should not contain object_type when no object is set' );
-		$this->assertArrayNotHasKey( 'object_id', $context, 'Context should not contain object_id when no object is set' );
+		$this->assertArrayNotHasKey( 'order', $context, 'Context should not contain order key when no object is set' );
+		$this->assertArrayNotHasKey( 'product', $context, 'Context should not contain product key when no object is set' );
+		$this->assertArrayNotHasKey( 'user', $context, 'Context should not contain user key when no object is set' );
 	}
 
 	/**

@@ -47,6 +47,11 @@ class EmailLogger implements RegisterHooksInterface {
 	/**
 	 * Capture the PHPMailer error from a failed wp_mail() call so it can be included in the log entry.
 	 *
+	 * Note: wp_mail_failed is a global hook; any plugin's failed wp_mail() will fire it. In the unlikely
+	 * event that a non-WooCommerce wp_mail() failure fires between a WooCommerce send failure and the
+	 * woocommerce_email_sent action, its error message could overwrite the WooCommerce one. The post-send
+	 * reset of $last_mail_error keeps the window as narrow as possible.
+	 *
 	 * @param WP_Error $error The error returned by wp_mail.
 	 * @return void
 	 */
