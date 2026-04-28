@@ -111,32 +111,47 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	}
 
 	/**
-	 * @testdox Recipient email address is stored in plain text.
+	 * @testdox Recipient is logged as the WordPress username for a registered user.
 	 */
-	public function test_recipient_is_stored_plain(): void {
-		$recipient = 'customer@example.com';
-		$email     = $this->create_mock_email( 'customer_processing_order', $recipient );
+	public function test_recipient_is_username_for_registered_user(): void {
+		$user  = self::factory()->user->create_and_get( array( 'user_email' => 'registered@example.com' ) );
+		$email = $this->create_mock_email( 'customer_processing_order', 'registered@example.com' );
 
 		$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
 
 		$context = $this->captured_logs[0]['context'];
 
 		$this->assertArrayHasKey( 'recipient', $context );
-		$this->assertSame( $recipient, $context['recipient'], 'Recipient should be stored as the plain email address' );
-		$this->assertArrayNotHasKey( 'recipient_hash', $context, 'recipient_hash key should not be present' );
+		$this->assertSame( $user->user_login, $context['recipient'], 'Recipient should be the WordPress username for a registered user' );
+		$this->assertStringNotContainsString( 'registered@example.com', $context['recipient'], 'Raw email address should not appear in the log context' );
+
+		wp_delete_user( $user->ID );
 	}
 
 	/**
-	 * @testdox Empty recipient results in an empty recipient value.
+	 * @testdox Recipient is logged as "guest" for an email address not linked to any user account.
 	 */
-	public function test_empty_recipient_produces_empty_string(): void {
+	public function test_recipient_is_guest_for_unregistered_email(): void {
+		$email = $this->create_mock_email( 'customer_processing_order', 'guest@example.com' );
+
+		$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
+
+		$context = $this->captured_logs[0]['context'];
+
+		$this->assertSame( 'guest', $context['recipient'], 'Recipient should be "guest" when the email is not linked to a user account' );
+	}
+
+	/**
+	 * @testdox Empty recipient is logged as "guest".
+	 */
+	public function test_empty_recipient_is_guest(): void {
 		$email = $this->create_mock_email( 'new_order', '' );
 
 		$this->sut->handle_woocommerce_email_sent( true, 'new_order', $email );
 
 		$context = $this->captured_logs[0]['context'];
 
-		$this->assertSame( '', $context['recipient'], 'Empty recipient should yield an empty recipient value' );
+		$this->assertSame( 'guest', $context['recipient'], 'Empty recipient should yield "guest"' );
 	}
 
 	/**

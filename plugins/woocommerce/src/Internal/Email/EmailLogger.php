@@ -15,7 +15,9 @@ use WP_User;
  * Logs transactional email send attempts so store owners can inspect what WooCommerce attempted locally.
  *
  * Records are written to the WooCommerce logger under the `transactional-emails` source and include the email type,
- * related object, recipient address, and the local send state. Failure reasons are captured from wp_mail_failed.
+ * related object, recipient identifier, and the local send state. The recipient is logged as the WordPress username
+ * when the address is linked to an account, or as 'guest' for unrecognised addresses. Failure reasons are captured
+ * from wp_mail_failed.
  *
  * @since 10.8.0
  * @internal
@@ -102,7 +104,7 @@ class EmailLogger implements RegisterHooksInterface {
 			'source'     => self::LOG_SOURCE,
 			'email_type' => $email_id,
 			'status'     => $success ? 'sent' : 'failed',
-			'recipient'  => $email->get_recipient(),
+			'recipient'  => $this->resolve_recipient( $email->get_recipient() ),
 		);
 
 		if ( ! empty( $object_context ) ) {
@@ -122,6 +124,33 @@ class EmailLogger implements RegisterHooksInterface {
 
 		$level = $success ? WC_Log_Levels::INFO : WC_Log_Levels::WARNING;
 		wc_get_logger()->log( $level, $message, $context );
+	}
+
+	/**
+	 * Resolve a recipient email string to an identifier safe for logging.
+	 *
+	 * Each address is mapped to the corresponding WordPress username when an account
+	 * exists, or to the string 'guest' for addresses with no associated account.
+	 * This avoids storing plain email addresses in logs while still giving support
+	 * teams a useful identifier for troubleshooting.
+	 *
+	 * @param string $recipient Comma-separated recipient email string from WC_Email::get_recipient().
+	 * @return string Comma-separated usernames or 'guest' labels.
+	 */
+	private function resolve_recipient( string $recipient ): string {
+		if ( '' === $recipient ) {
+			return 'guest';
+		}
+
+		$labels = array_map(
+			function ( string $email ): string {
+				$user = get_user_by( 'email', trim( $email ) );
+				return $user instanceof WP_User ? $user->user_login : 'guest';
+			},
+			explode( ',', $recipient )
+		);
+
+		return implode( ', ', $labels );
 	}
 
 	/**
