@@ -1116,6 +1116,62 @@ class WC_Email extends WC_Settings_API {
 	}
 
 	/**
+	 * Send the email notification when enabled and a recipient is available.
+	 *
+	 * This is the standard helper used by trigger() methods. It checks whether the email
+	 * is enabled and whether a recipient address exists, fires appropriate action hooks for
+	 * the disabled or skipped outcome, and otherwise delegates to send() with the
+	 * standard content parameters.
+	 *
+	 * Subclasses that intentionally bypass the enabled check (e.g. manually-triggered invoice
+	 * emails, POS receipts) should NOT call this method and should continue to call send()
+	 * directly.
+	 *
+	 * @since 10.8.0
+	 * @return bool Whether the email was sent successfully.
+	 */
+	protected function send_notification(): bool {
+		if ( ! $this->is_enabled() ) {
+			/**
+			 * Fires when a transactional email is not sent because the email type is disabled.
+			 *
+			 * @since 10.8.0
+			 *
+			 * @param string   $email_id The email type ID (e.g. `customer_processing_order`).
+			 * @param WC_Email $email    The WC_Email instance.
+			 */
+			do_action( 'woocommerce_email_disabled', $this->id, $this );
+			return false;
+		}
+
+		if ( ! $this->get_recipient() ) {
+			/**
+			 * Fires when a transactional email is not sent for a reason other than being disabled.
+			 *
+			 * The $reason parameter identifies why the email was not sent:
+			 * - 'no_recipient': No recipient address was available at send time.
+			 * - 'already_sent': The email was already sent for this object and resend is not allowed.
+			 *
+			 * @since 10.8.0
+			 *
+			 * @param string   $reason   Short identifier for why the email was skipped.
+			 * @param string   $email_id The email type ID.
+			 * @param WC_Email $email    The WC_Email instance.
+			 */
+			do_action( 'woocommerce_email_skipped', 'no_recipient', $this->id, $this );
+			return false;
+		}
+
+		return $this->send(
+			$this->get_recipient(),
+			$this->get_subject(),
+			$this->get_content(),
+			$this->get_headers(),
+			$this->get_attachments()
+		);
+	}
+
+	/**
 	 * Send an email.
 	 *
 	 * @param string $to Email to.

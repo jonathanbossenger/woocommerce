@@ -120,15 +120,16 @@ if ( ! class_exists( 'WC_Email_New_Order' ) ) :
 			 * @param bool $allows Defaults to false.
 			 */
 			if ( $email_already_sent && ! apply_filters( 'woocommerce_new_order_email_allows_resend', false ) ) {
+				/** This action is documented in includes/emails/class-wc-email.php */
+				do_action( 'woocommerce_email_skipped', 'already_sent', $this->id, $this );
+				$this->restore_locale();
 				return;
 			}
 
-			if ( $this->is_enabled() && $this->get_recipient() ) {
-				$email_sent_successfully = $this->send( $this->get_recipient(), $this->get_subject(), $this->get_content(), $this->get_headers(), $this->get_attachments() );
-				if ( $email_sent_successfully ) {
-					$order->update_meta_data( '_new_order_email_sent', 'true' );
-					$order->save();
-				}
+			$email_sent_successfully = $this->send_notification();
+			if ( $email_sent_successfully && is_a( $order, 'WC_Order' ) ) {
+				$order->update_meta_data( '_new_order_email_sent', 'true' );
+				$order->save();
 			}
 
 			$this->restore_locale();

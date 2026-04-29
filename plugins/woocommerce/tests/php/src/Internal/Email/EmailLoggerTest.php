@@ -39,11 +39,13 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		remove_all_filters( 'woocommerce_email_log_context' );
 		remove_action( 'woocommerce_email_sent', array( $this->sut, 'handle_woocommerce_email_sent' ) );
 		remove_action( 'wp_mail_failed', array( $this->sut, 'capture_mail_error' ) );
+		remove_action( 'woocommerce_email_disabled', array( $this->sut, 'handle_woocommerce_email_disabled' ) );
+		remove_action( 'woocommerce_email_skipped', array( $this->sut, 'handle_woocommerce_email_skipped' ) );
 		parent::tearDown();
 	}
 
 	/**
-	 * @testdox Register method adds hooks for woocommerce_email_sent and wp_mail_failed.
+	 * @testdox Register method adds hooks for woocommerce_email_sent, wp_mail_failed, woocommerce_email_disabled, and woocommerce_email_skipped.
 	 */
 	public function test_register_adds_hook(): void {
 		$this->sut->register();
@@ -55,6 +57,14 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$this->assertNotFalse(
 			has_action( 'wp_mail_failed', array( $this->sut, 'capture_mail_error' ) ),
 			'Expected hook to be registered for wp_mail_failed'
+		);
+		$this->assertNotFalse(
+			has_action( 'woocommerce_email_disabled', array( $this->sut, 'handle_woocommerce_email_disabled' ) ),
+			'Expected hook to be registered for woocommerce_email_disabled'
+		);
+		$this->assertNotFalse(
+			has_action( 'woocommerce_email_skipped', array( $this->sut, 'handle_woocommerce_email_skipped' ) ),
+			'Expected hook to be registered for woocommerce_email_skipped'
 		);
 	}
 
@@ -270,6 +280,147 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$this->sut->handle_woocommerce_email_sent( true, 'new_order', $email );
 
 		$this->assertLogged( 'info', 'new_order', array( 'custom_key' => 'custom_value' ) );
+	}
+
+	/**
+	 * @testdox Logs an info entry when email is disabled.
+	 */
+	public function test_logs_info_when_email_is_disabled(): void {
+		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com' );
+
+		$this->sut->handle_woocommerce_email_disabled( 'customer_processing_order', $email );
+
+		$this->assertLogged( 'info', 'customer_processing_order' );
+	}
+
+	/**
+	 * @testdox Disabled log context contains status "disabled".
+	 */
+	public function test_disabled_log_context_contains_disabled_status(): void {
+		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
+
+		$this->sut->handle_woocommerce_email_disabled( 'new_order', $email );
+
+		$this->assertLogged(
+			'info',
+			'new_order',
+			array(
+				'source'     => 'transactional-emails',
+				'email_type' => 'new_order',
+				'status'     => 'disabled',
+			)
+		);
+	}
+
+	/**
+	 * @testdox Disabled log message contains "disabled".
+	 */
+	public function test_disabled_log_message_contains_disabled(): void {
+		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
+
+		$this->sut->handle_woocommerce_email_disabled( 'new_order', $email );
+
+		$this->assertLogged( 'info', 'disabled' );
+	}
+
+	/**
+	 * @testdox woocommerce_email_log_enabled filter suppresses disabled log entry.
+	 */
+	public function test_log_enabled_filter_suppresses_disabled_entry(): void {
+		add_filter( 'woocommerce_email_log_enabled', '__return_false' );
+
+		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com' );
+		$this->sut->handle_woocommerce_email_disabled( 'customer_processing_order', $email );
+
+		$this->assertEmpty( $this->captured_logs, 'No log entry should be written when the enabled filter returns false' );
+	}
+
+	/**
+	 * @testdox Logs an info entry when email is skipped.
+	 */
+	public function test_logs_info_when_email_is_skipped(): void {
+		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com' );
+
+		$this->sut->handle_woocommerce_email_skipped( 'no_recipient', 'customer_processing_order', $email );
+
+		$this->assertLogged( 'info', 'customer_processing_order' );
+	}
+
+	/**
+	 * @testdox Skipped log context contains status "skipped" and the skip reason.
+	 */
+	public function test_skipped_log_context_contains_skipped_status_and_reason(): void {
+		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
+
+		$this->sut->handle_woocommerce_email_skipped( 'already_sent', 'new_order', $email );
+
+		$this->assertLogged(
+			'info',
+			'new_order',
+			array(
+				'source'     => 'transactional-emails',
+				'email_type' => 'new_order',
+				'status'     => 'skipped',
+				'reason'     => 'already_sent',
+			)
+		);
+	}
+
+	/**
+	 * @testdox Skipped log message contains the skip reason.
+	 */
+	public function test_skipped_log_message_contains_reason(): void {
+		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
+
+		$this->sut->handle_woocommerce_email_skipped( 'no_recipient', 'new_order', $email );
+
+		$this->assertLogged( 'info', 'no_recipient' );
+	}
+
+	/**
+	 * @testdox woocommerce_email_log_enabled filter suppresses skipped log entry.
+	 */
+	public function test_log_enabled_filter_suppresses_skipped_entry(): void {
+		add_filter( 'woocommerce_email_log_enabled', '__return_false' );
+
+		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com' );
+		$this->sut->handle_woocommerce_email_skipped( 'no_recipient', 'customer_processing_order', $email );
+
+		$this->assertEmpty( $this->captured_logs, 'No log entry should be written when the enabled filter returns false' );
+	}
+
+	/**
+	 * @testdox Disabled log includes object context for WC_Order.
+	 */
+	public function test_disabled_log_includes_order_context(): void {
+		$order = $this->createMock( \WC_Order::class );
+		$order->method( 'get_id' )->willReturn( 99 );
+		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com', $order );
+
+		$this->sut->handle_woocommerce_email_disabled( 'customer_processing_order', $email );
+
+		$this->assertLogged(
+			'info',
+			'customer_processing_order',
+			array( 'order' => 99 )
+		);
+	}
+
+	/**
+	 * @testdox Skipped log includes object context for WC_Order.
+	 */
+	public function test_skipped_log_includes_order_context(): void {
+		$order = $this->createMock( \WC_Order::class );
+		$order->method( 'get_id' )->willReturn( 77 );
+		$email = $this->create_mock_email( 'new_order', 'admin@example.com', $order );
+
+		$this->sut->handle_woocommerce_email_skipped( 'already_sent', 'new_order', $email );
+
+		$this->assertLogged(
+			'info',
+			'new_order',
+			array( 'order' => 77 )
+		);
 	}
 
 	/**
