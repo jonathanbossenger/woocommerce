@@ -33,6 +33,21 @@ if ( class_exists( 'WC_Email', false ) ) {
 class WC_Email extends WC_Settings_API {
 
 	/**
+	 * Skip-reason identifier used when the email has no recipient address.
+	 *
+	 * @since 10.8.0
+	 */
+	public const SKIP_REASON_NO_RECIPIENT = 'no_recipient';
+
+	/**
+	 * Skip-reason identifier used when the email was already sent for this object
+	 * and a resend is not allowed.
+	 *
+	 * @since 10.8.0
+	 */
+	public const SKIP_REASON_ALREADY_SENT = 'already_sent';
+
+	/**
 	 * Email method ID.
 	 *
 	 * @var string
@@ -1144,13 +1159,15 @@ class WC_Email extends WC_Settings_API {
 			return false;
 		}
 
-		if ( ! $this->get_recipient() ) {
+		$recipient = $this->get_recipient();
+
+		if ( ! $recipient ) {
 			/**
 			 * Fires when a transactional email is not sent for a reason other than being disabled.
 			 *
 			 * The $reason parameter identifies why the email was not sent:
-			 * - 'no_recipient': No recipient address was available at send time.
-			 * - 'already_sent': The email was already sent for this object and resend is not allowed.
+			 * - WC_Email::SKIP_REASON_NO_RECIPIENT: No recipient address was available at send time.
+			 * - WC_Email::SKIP_REASON_ALREADY_SENT: The email was already sent for this object and resend is not allowed.
 			 *
 			 * @since 10.8.0
 			 *
@@ -1158,12 +1175,42 @@ class WC_Email extends WC_Settings_API {
 			 * @param string   $email_id The email type ID.
 			 * @param WC_Email $email    The WC_Email instance.
 			 */
-			do_action( 'woocommerce_email_skipped', 'no_recipient', $this->id, $this );
+			do_action( 'woocommerce_email_skipped', self::SKIP_REASON_NO_RECIPIENT, $this->id, $this );
 			return false;
 		}
 
 		return $this->send(
-			$this->get_recipient(),
+			$recipient,
+			$this->get_subject(),
+			$this->get_content(),
+			$this->get_headers(),
+			$this->get_attachments()
+		);
+	}
+
+	/**
+	 * Send the email when a recipient is available, regardless of the enabled setting.
+	 *
+	 * This helper is intended for manually-triggered emails (e.g. invoice resend, POS receipts)
+	 * that intentionally bypass the enabled/disabled check. It fires
+	 * `woocommerce_email_skipped` with reason {@see WC_Email::SKIP_REASON_NO_RECIPIENT} when
+	 * no recipient is available so the outcome is still observable via the EmailLogger, and
+	 * otherwise delegates to send().
+	 *
+	 * @since 10.8.0
+	 * @return bool Whether the email was sent successfully.
+	 */
+	protected function send_if_recipient(): bool {
+		$recipient = $this->get_recipient();
+
+		if ( ! $recipient ) {
+			/** This action is documented in includes/emails/class-wc-email.php */
+			do_action( 'woocommerce_email_skipped', self::SKIP_REASON_NO_RECIPIENT, $this->id, $this );
+			return false;
+		}
+
+		return $this->send(
+			$recipient,
 			$this->get_subject(),
 			$this->get_content(),
 			$this->get_headers(),

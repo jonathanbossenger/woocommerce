@@ -136,33 +136,7 @@ class EmailLogger implements RegisterHooksInterface {
 	 * @return void
 	 */
 	public function handle_woocommerce_email_disabled( string $email_id, WC_Email $email ): void {
-		/** This filter is documented in src/Internal/Email/EmailLogger.php */
-		if ( ! apply_filters( 'woocommerce_email_log_enabled', true, $email_id, $email ) ) {
-			return;
-		}
-
-		$object_context = $this->get_object_context( $email->object );
-		$object_label   = isset( $object_context['type'], $object_context['id'] )
-			? sprintf( ' for %s #%d', $object_context['type'], $object_context['id'] )
-			: '';
-
-		$message = sprintf( 'Email "%s"%s not sent: email type is disabled', $email_id, $object_label );
-
-		$context = array(
-			'source'     => self::LOG_SOURCE,
-			'email_type' => $email_id,
-			'status'     => 'disabled',
-			'recipient'  => $this->resolve_recipient( $email->get_recipient() ),
-		);
-
-		if ( ! empty( $object_context ) ) {
-			$context[ $object_context['type'] ] = $object_context['id'] ?? null;
-		}
-
-		/** This filter is documented in src/Internal/Email/EmailLogger.php */
-		$context = (array) apply_filters( 'woocommerce_email_log_context', $context, $email_id, $email );
-
-		wc_get_logger()->log( WC_Log_Levels::INFO, $message, $context );
+		$this->log_non_send_outcome( $email_id, $email, 'disabled' );
 	}
 
 	/**
@@ -174,6 +148,24 @@ class EmailLogger implements RegisterHooksInterface {
 	 * @return void
 	 */
 	public function handle_woocommerce_email_skipped( string $reason, string $email_id, WC_Email $email ): void {
+		$this->log_non_send_outcome( $email_id, $email, 'skipped', $reason );
+	}
+
+	/**
+	 * Write a log entry for an email that was not sent (disabled or skipped).
+	 *
+	 * Centralises the shared logic for disabled and skipped outcomes so that the context
+	 * schema (`source`, `email_type`, `status`, `reason`, `recipient`, object key) is
+	 * defined in exactly one place. Future additions (e.g. a `correlation_id` field) only
+	 * need to be made here.
+	 *
+	 * @param string      $email_id The email type ID.
+	 * @param WC_Email    $email    The WC_Email instance.
+	 * @param string      $status   The outcome status: 'disabled' or 'skipped'.
+	 * @param string|null $reason   Optional reason identifier (only set for 'skipped' status).
+	 * @return void
+	 */
+	private function log_non_send_outcome( string $email_id, WC_Email $email, string $status, ?string $reason = null ): void {
 		/** This filter is documented in src/Internal/Email/EmailLogger.php */
 		if ( ! apply_filters( 'woocommerce_email_log_enabled', true, $email_id, $email ) ) {
 			return;
@@ -184,15 +176,22 @@ class EmailLogger implements RegisterHooksInterface {
 			? sprintf( ' for %s #%d', $object_context['type'], $object_context['id'] )
 			: '';
 
-		$message = sprintf( 'Email "%s"%s not sent: %s', $email_id, $object_label, $reason );
+		if ( 'disabled' === $status ) {
+			$message = sprintf( 'Email "%s"%s not sent: email type is disabled', $email_id, $object_label );
+		} else {
+			$message = sprintf( 'Email "%s"%s not sent: %s', $email_id, $object_label, $reason );
+		}
 
 		$context = array(
 			'source'     => self::LOG_SOURCE,
 			'email_type' => $email_id,
-			'status'     => 'skipped',
-			'reason'     => $reason,
+			'status'     => $status,
 			'recipient'  => $this->resolve_recipient( $email->get_recipient() ),
 		);
+
+		if ( null !== $reason ) {
+			$context['reason'] = $reason;
+		}
 
 		if ( ! empty( $object_context ) ) {
 			$context[ $object_context['type'] ] = $object_context['id'] ?? null;

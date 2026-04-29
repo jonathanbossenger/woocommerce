@@ -50,21 +50,25 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	public function test_register_adds_hook(): void {
 		$this->sut->register();
 
-		$this->assertNotFalse(
+		$this->assertSame(
+			10,
 			has_action( 'woocommerce_email_sent', array( $this->sut, 'handle_woocommerce_email_sent' ) ),
-			'Expected hook to be registered for woocommerce_email_sent'
+			'Expected hook to be registered at priority 10 for woocommerce_email_sent'
 		);
-		$this->assertNotFalse(
+		$this->assertSame(
+			10,
 			has_action( 'wp_mail_failed', array( $this->sut, 'capture_mail_error' ) ),
-			'Expected hook to be registered for wp_mail_failed'
+			'Expected hook to be registered at priority 10 for wp_mail_failed'
 		);
-		$this->assertNotFalse(
+		$this->assertSame(
+			10,
 			has_action( 'woocommerce_email_disabled', array( $this->sut, 'handle_woocommerce_email_disabled' ) ),
-			'Expected hook to be registered for woocommerce_email_disabled'
+			'Expected hook to be registered at priority 10 for woocommerce_email_disabled'
 		);
-		$this->assertNotFalse(
+		$this->assertSame(
+			10,
 			has_action( 'woocommerce_email_skipped', array( $this->sut, 'handle_woocommerce_email_skipped' ) ),
-			'Expected hook to be registered for woocommerce_email_skipped'
+			'Expected hook to be registered at priority 10 for woocommerce_email_skipped'
 		);
 	}
 
@@ -341,7 +345,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	public function test_logs_info_when_email_is_skipped(): void {
 		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com' );
 
-		$this->sut->handle_woocommerce_email_skipped( 'no_recipient', 'customer_processing_order', $email );
+		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_NO_RECIPIENT, 'customer_processing_order', $email );
 
 		$this->assertLogged( 'info', 'customer_processing_order' );
 	}
@@ -352,7 +356,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	public function test_skipped_log_context_contains_skipped_status_and_reason(): void {
 		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
 
-		$this->sut->handle_woocommerce_email_skipped( 'already_sent', 'new_order', $email );
+		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_ALREADY_SENT, 'new_order', $email );
 
 		$this->assertLogged(
 			'info',
@@ -361,7 +365,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 				'source'     => 'transactional-emails',
 				'email_type' => 'new_order',
 				'status'     => 'skipped',
-				'reason'     => 'already_sent',
+				'reason'     => \WC_Email::SKIP_REASON_ALREADY_SENT,
 			)
 		);
 	}
@@ -372,9 +376,9 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	public function test_skipped_log_message_contains_reason(): void {
 		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
 
-		$this->sut->handle_woocommerce_email_skipped( 'no_recipient', 'new_order', $email );
+		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_NO_RECIPIENT, 'new_order', $email );
 
-		$this->assertLogged( 'info', 'no_recipient' );
+		$this->assertLogged( 'info', \WC_Email::SKIP_REASON_NO_RECIPIENT );
 	}
 
 	/**
@@ -384,7 +388,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		add_filter( 'woocommerce_email_log_enabled', '__return_false' );
 
 		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com' );
-		$this->sut->handle_woocommerce_email_skipped( 'no_recipient', 'customer_processing_order', $email );
+		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_NO_RECIPIENT, 'customer_processing_order', $email );
 
 		$this->assertEmpty( $this->captured_logs, 'No log entry should be written when the enabled filter returns false' );
 	}
@@ -414,13 +418,184 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$order->method( 'get_id' )->willReturn( 77 );
 		$email = $this->create_mock_email( 'new_order', 'admin@example.com', $order );
 
-		$this->sut->handle_woocommerce_email_skipped( 'already_sent', 'new_order', $email );
+		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_ALREADY_SENT, 'new_order', $email );
 
 		$this->assertLogged(
 			'info',
 			'new_order',
 			array( 'order' => 77 )
 		);
+	}
+
+	/**
+	 * @testdox send_notification() fires woocommerce_email_disabled and returns false when email is disabled.
+	 */
+	public function test_send_notification_fires_disabled_and_returns_false_when_disabled(): void {
+		$email = $this->create_testable_email( 'my_email', '', is_enabled: false );
+
+		$disabled_fired = false;
+		add_action(
+			'woocommerce_email_disabled',
+			function ( $email_id ) use ( &$disabled_fired ) {
+				if ( 'my_email' === $email_id ) {
+					$disabled_fired = true;
+				}
+			}
+		);
+
+		$result = $email->run_send_notification();
+
+		$this->assertFalse( $result, 'send_notification() should return false when email is disabled' );
+		$this->assertTrue( $disabled_fired, 'woocommerce_email_disabled should fire when email is disabled' );
+		$this->assertFalse( $email->send_called, 'send() should not be called when email is disabled' );
+	}
+
+	/**
+	 * @testdox send_notification() fires woocommerce_email_skipped with no_recipient and returns false when recipient is empty.
+	 */
+	public function test_send_notification_fires_skipped_and_returns_false_when_no_recipient(): void {
+		$email = $this->create_testable_email( 'my_email', '', is_enabled: true );
+
+		$skipped_reason = null;
+		add_action(
+			'woocommerce_email_skipped',
+			function ( $reason, $email_id ) use ( &$skipped_reason ) {
+				if ( 'my_email' === $email_id ) {
+					$skipped_reason = $reason;
+				}
+			},
+			10,
+			2
+		);
+
+		$result = $email->run_send_notification();
+
+		$this->assertFalse( $result, 'send_notification() should return false when no recipient' );
+		$this->assertSame( \WC_Email::SKIP_REASON_NO_RECIPIENT, $skipped_reason, 'woocommerce_email_skipped should fire with no_recipient reason' );
+		$this->assertFalse( $email->send_called, 'send() should not be called when no recipient' );
+	}
+
+	/**
+	 * @testdox send_notification() calls send() with the correct arguments and forwards its return value when enabled and recipient exists.
+	 */
+	public function test_send_notification_calls_send_and_returns_result_when_conditions_met(): void {
+		$email = $this->create_testable_email( 'my_email', 'admin@example.com', is_enabled: true, send_return: true );
+
+		$result = $email->run_send_notification();
+
+		$this->assertTrue( $result, 'send_notification() should forward the return value from send()' );
+		$this->assertTrue( $email->send_called, 'send() should be called when email is enabled and has a recipient' );
+		$this->assertSame( 'admin@example.com', $email->send_args[0], 'send() should receive the cached recipient as first argument' );
+	}
+
+	/**
+	 * @testdox send_if_recipient() fires woocommerce_email_skipped and returns false when recipient is empty.
+	 */
+	public function test_send_if_recipient_fires_skipped_and_returns_false_when_no_recipient(): void {
+		$email = $this->create_testable_email( 'my_email', '', is_enabled: false );
+
+		$skipped_fired = false;
+		add_action(
+			'woocommerce_email_skipped',
+			function ( $reason, $email_id ) use ( &$skipped_fired ) {
+				if ( 'my_email' === $email_id && \WC_Email::SKIP_REASON_NO_RECIPIENT === $reason ) {
+					$skipped_fired = true;
+				}
+			},
+			10,
+			2
+		);
+
+		$result = $email->run_send_if_recipient();
+
+		$this->assertFalse( $result, 'send_if_recipient() should return false when no recipient' );
+		$this->assertTrue( $skipped_fired, 'woocommerce_email_skipped should fire with no_recipient reason' );
+		$this->assertFalse( $email->send_called, 'send() should not be called when no recipient' );
+	}
+
+	/**
+	 * @testdox send_if_recipient() calls send() even when is_enabled() is false, bypassing the enabled check.
+	 */
+	public function test_send_if_recipient_calls_send_even_when_disabled(): void {
+		$email = $this->create_testable_email( 'my_email', 'admin@example.com', is_enabled: false, send_return: true );
+
+		$result = $email->run_send_if_recipient();
+
+		$this->assertTrue( $result, 'send_if_recipient() should forward the return value from send()' );
+		$this->assertTrue( $email->send_called, 'send() should be called regardless of is_enabled() state' );
+	}
+
+	/**
+	 * Create a minimal WC_Email subclass for unit-testing send_notification() and send_if_recipient().
+	 *
+	 * Exposes both protected helpers as public `run_*` wrappers and records whether send() was called.
+	 *
+	 * @param string $email_id    Email type ID.
+	 * @param string $recipient   Recipient email address (empty string = no recipient).
+	 * @param bool   $is_enabled  Return value for is_enabled().
+	 * @param bool   $send_return Return value for the stubbed send().
+	 * @return object Anonymous class instance with `run_send_notification()`, `run_send_if_recipient()`,
+	 *                `send_called`, and `send_args` properties.
+	 */
+	private function create_testable_email( string $email_id, string $recipient, bool $is_enabled, bool $send_return = false ): object {
+		return new class( $email_id, $recipient, $is_enabled, $send_return ) extends \WC_Email {
+			/** @var bool */
+			public bool $send_called = false;
+			/** @var array */
+			public array $send_args  = array();
+
+			private string $test_recipient;
+			private bool   $test_is_enabled;
+			private bool   $test_send_return;
+
+			public function __construct( string $email_id, string $recipient, bool $is_enabled, bool $send_return ) {
+				// Deliberately skip parent::__construct() to avoid side-effects in tests.
+				$this->id               = $email_id;
+				$this->test_recipient   = $recipient;
+				$this->test_is_enabled  = $is_enabled;
+				$this->test_send_return = $send_return;
+			}
+
+			public function is_enabled(): bool {
+				return $this->test_is_enabled;
+			}
+
+			public function get_recipient(): string {
+				return $this->test_recipient;
+			}
+
+			public function get_subject(): string {
+				return 'Test subject';
+			}
+
+			public function get_content(): string {
+				return 'Test content';
+			}
+
+			public function get_headers(): string {
+				return '';
+			}
+
+			public function get_attachments(): array {
+				return array();
+			}
+
+			public function send( $to, $subject, $message, $headers, $attachments ): bool {
+				$this->send_called = true;
+				$this->send_args   = array( $to, $subject, $message, $headers, $attachments );
+				return $this->test_send_return;
+			}
+
+			/** Exposes the protected send_notification() for testing. */
+			public function run_send_notification(): bool {
+				return $this->send_notification();
+			}
+
+			/** Exposes the protected send_if_recipient() for testing. */
+			public function run_send_if_recipient(): bool {
+				return $this->send_if_recipient();
+			}
+		};
 	}
 
 	/**
