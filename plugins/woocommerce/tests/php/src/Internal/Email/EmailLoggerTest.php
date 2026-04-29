@@ -37,10 +37,10 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	public function tearDown(): void {
 		remove_all_filters( 'woocommerce_email_log_enabled' );
 		remove_all_filters( 'woocommerce_email_log_context' );
+		remove_all_actions( 'woocommerce_email_disabled' );
+		remove_all_actions( 'woocommerce_email_skipped' );
 		remove_action( 'woocommerce_email_sent', array( $this->sut, 'handle_woocommerce_email_sent' ) );
 		remove_action( 'wp_mail_failed', array( $this->sut, 'capture_mail_error' ) );
-		remove_action( 'woocommerce_email_disabled', array( $this->sut, 'handle_woocommerce_email_disabled' ) );
-		remove_action( 'woocommerce_email_skipped', array( $this->sut, 'handle_woocommerce_email_skipped' ) );
 		parent::tearDown();
 	}
 
@@ -431,7 +431,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	 * @testdox send_notification() fires woocommerce_email_disabled and returns false when email is disabled.
 	 */
 	public function test_send_notification_fires_disabled_and_returns_false_when_disabled(): void {
-		$email = $this->create_testable_email( 'my_email', '', is_enabled: false );
+		$email = $this->create_testable_email( 'my_email', '', false );
 
 		$disabled_fired = false;
 		add_action(
@@ -454,7 +454,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	 * @testdox send_notification() fires woocommerce_email_skipped with no_recipient and returns false when recipient is empty.
 	 */
 	public function test_send_notification_fires_skipped_and_returns_false_when_no_recipient(): void {
-		$email = $this->create_testable_email( 'my_email', '', is_enabled: true );
+		$email = $this->create_testable_email( 'my_email', '', true );
 
 		$skipped_reason = null;
 		add_action(
@@ -479,7 +479,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	 * @testdox send_notification() calls send() with the correct arguments and forwards its return value when enabled and recipient exists.
 	 */
 	public function test_send_notification_calls_send_and_returns_result_when_conditions_met(): void {
-		$email = $this->create_testable_email( 'my_email', 'admin@example.com', is_enabled: true, send_return: true );
+		$email = $this->create_testable_email( 'my_email', 'admin@example.com', true, true );
 
 		$result = $email->run_send_notification();
 
@@ -492,7 +492,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	 * @testdox send_if_recipient() fires woocommerce_email_skipped and returns false when recipient is empty.
 	 */
 	public function test_send_if_recipient_fires_skipped_and_returns_false_when_no_recipient(): void {
-		$email = $this->create_testable_email( 'my_email', '', is_enabled: false );
+		$email = $this->create_testable_email( 'my_email', '', false );
 
 		$skipped_fired = false;
 		add_action(
@@ -517,7 +517,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	 * @testdox send_if_recipient() calls send() even when is_enabled() is false, bypassing the enabled check.
 	 */
 	public function test_send_if_recipient_calls_send_even_when_disabled(): void {
-		$email = $this->create_testable_email( 'my_email', 'admin@example.com', is_enabled: false, send_return: true );
+		$email = $this->create_testable_email( 'my_email', 'admin@example.com', false, true );
 
 		$result = $email->run_send_if_recipient();
 
