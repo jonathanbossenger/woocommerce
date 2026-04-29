@@ -160,7 +160,7 @@ class EmailLogger implements RegisterHooksInterface {
 	 * is not brittle across subclasses (e.g. WC_Order_Refund still returns type 'order').
 	 *
 	 * @param mixed $wc_object The email's related object (WC_Order, WC_Product, WP_User, etc.) or false/null.
-	 * @return array{type: string, id: int}|array{} Type and ID of the object, or empty when no object is set.
+	 * @return array{type: string, id?: int}|array{} Type and (when resolvable) ID of the object, or empty when no object is set.
 	 */
 	private function get_object_context( $wc_object ): array {
 		if ( ! is_object( $wc_object ) ) {
