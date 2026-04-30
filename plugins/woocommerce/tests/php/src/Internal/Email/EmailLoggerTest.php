@@ -117,15 +117,17 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$user  = self::factory()->user->create_and_get( array( 'user_email' => 'registered@example.com' ) );
 		$email = $this->create_mock_email( 'customer_processing_order', 'registered@example.com' );
 
-		$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
+		try {
+			$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
 
-		$context = $this->captured_logs[0]['context'];
+			$context = $this->captured_logs[0]['context'];
 
-		$this->assertArrayHasKey( 'recipient', $context );
-		$this->assertSame( $user->user_login, $context['recipient'], 'Recipient should be the WordPress username for a registered user' );
-		$this->assertStringNotContainsString( 'registered@example.com', $context['recipient'], 'Raw email address should not appear in the log context' );
-
-		wp_delete_user( $user->ID );
+			$this->assertArrayHasKey( 'recipient', $context );
+			$this->assertSame( $user->user_login, $context['recipient'], 'Recipient should be the WordPress username for a registered user' );
+			$this->assertStringNotContainsString( 'registered@example.com', $context['recipient'], 'Raw email address should not appear in the log context' );
+		} finally {
+			wp_delete_user( $user->ID );
+		}
 	}
 
 	/**
