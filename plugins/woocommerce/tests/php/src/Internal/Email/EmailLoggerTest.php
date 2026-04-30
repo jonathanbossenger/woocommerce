@@ -228,6 +228,64 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	}
 
 	/**
+	 * @testdox Object with a get_id() requiring parameters falls back to the ID property.
+	 */
+	public function test_object_with_required_get_id_parameters_falls_back_to_id_property(): void {
+		$wc_object     = new class() {
+			public int $ID = 0; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- Mirrors WP_Post::$ID.
+
+			/**
+			 * get_id with a required parameter, which the logger guard should refuse to call.
+			 *
+			 * @param int $context Required parameter.
+			 * @return int
+			 */
+			public function get_id( int $context ): int {
+				return $context;
+			}
+		};
+		$wc_object->ID = 7;
+		$class_name    = get_class( $wc_object );
+		$email         = $this->create_mock_email( 'custom_email', 'customer@example.com', $wc_object );
+
+		$this->sut->handle_woocommerce_email_sent( true, 'custom_email', $email );
+
+		$context = $this->captured_logs[0]['context'];
+
+		$this->assertArrayHasKey( $class_name, $context );
+		$this->assertSame( 7, $context[ $class_name ] );
+	}
+
+	/**
+	 * @testdox Object whose get_id() throws does not break logging.
+	 */
+	public function test_object_with_throwing_get_id_does_not_break_logging(): void {
+		$wc_object     = new class() {
+			public int $ID = 0; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- Mirrors WP_Post::$ID.
+
+			/**
+			 * get_id that always throws to simulate a misbehaving extension object.
+			 *
+			 * @return int
+			 * @throws \RuntimeException Always.
+			 */
+			public function get_id(): int {
+				throw new \RuntimeException( 'broken get_id' );
+			}
+		};
+		$wc_object->ID = 11;
+		$class_name    = get_class( $wc_object );
+		$email         = $this->create_mock_email( 'custom_email', 'customer@example.com', $wc_object );
+
+		$this->sut->handle_woocommerce_email_sent( true, 'custom_email', $email );
+
+		$context = $this->captured_logs[0]['context'];
+
+		$this->assertArrayHasKey( $class_name, $context );
+		$this->assertSame( 11, $context[ $class_name ] );
+	}
+
+	/**
 	 * @testdox Object context is omitted when the email has no related object.
 	 */
 	public function test_object_context_omitted_when_no_object(): void {

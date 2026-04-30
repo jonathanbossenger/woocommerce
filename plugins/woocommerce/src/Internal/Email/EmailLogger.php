@@ -177,11 +177,23 @@ class EmailLogger implements RegisterHooksInterface {
 			$type = get_class( $wc_object );
 		}
 
+		$id = null;
 		if ( method_exists( $wc_object, 'get_id' ) ) {
-			$id = (int) $wc_object->get_id();
-		} elseif ( property_exists( $wc_object, 'ID' ) ) {
+			try {
+				$method = new \ReflectionMethod( $wc_object, 'get_id' );
+				if ( 0 === $method->getNumberOfRequiredParameters() ) {
+					$id = (int) $wc_object->get_id();
+				}
+			} catch ( \Throwable $e ) {
+				$id = null;
+			}
+		}
+
+		if ( null === $id && property_exists( $wc_object, 'ID' ) ) {
 			$id = (int) $wc_object->ID;
-		} else {
+		}
+
+		if ( null === $id ) {
 			return array( 'type' => $type );
 		}
 
