@@ -3,6 +3,7 @@ declare( strict_types = 1 );
 
 namespace Automattic\WooCommerce\Internal\Email;
 
+use Automattic\WooCommerce\Internal\Orders\OrderNoteGroup;
 use Automattic\WooCommerce\Internal\RegisterHooksInterface;
 use WC_Email;
 use WC_Log_Levels;
@@ -91,10 +92,12 @@ class EmailLogger implements RegisterHooksInterface {
 			? sprintf( ' for %s #%d', $object_context['type'], $object_context['id'] )
 			: '';
 
+		$error_reason = $this->last_mail_error;
+
 		if ( $success ) {
 			$message = sprintf( 'Email "%s"%s sent', $email_id, $object_label );
 		} else {
-			$reason  = $this->last_mail_error ? ': ' . $this->last_mail_error : '';
+			$reason  = $error_reason ? ': ' . $error_reason : '';
 			$message = sprintf( 'Email "%s"%s failed to send%s', $email_id, $object_label, $reason );
 		}
 
@@ -124,6 +127,52 @@ class EmailLogger implements RegisterHooksInterface {
 
 		$level = $success ? WC_Log_Levels::INFO : WC_Log_Levels::WARNING;
 		wc_get_logger()->log( $level, $message, $context );
+
+		$this->maybe_add_order_note( $email->object, $email_id, $email, $success, $error_reason );
+	}
+
+	/**
+	 * Add a private order note when a transactional email is sent or fails for an order.
+	 *
+	 * This makes the email event directly visible on the order admin page, supplementing
+	 * the WooCommerce logger entry with a record that is associated with the order itself.
+	 *
+	 * @param mixed    $wc_object    The email's related object, or false/null when none is set.
+	 * @param string   $email_id     The email type ID (e.g. `customer_processing_order`).
+	 * @param WC_Email $email        The WC_Email instance.
+	 * @param bool     $success      Whether the email was sent successfully.
+	 * @param string|null $error_reason The error message from wp_mail_failed, or null.
+	 * @return void
+	 */
+	private function maybe_add_order_note( $wc_object, string $email_id, WC_Email $email, bool $success, ?string $error_reason ): void {
+		if ( ! $wc_object instanceof WC_Order ) {
+			return;
+		}
+
+		$email_label = $email->get_title() ?: $email_id;
+
+		if ( $success ) {
+			$note = sprintf(
+				/* translators: %s: Email title or type identifier */
+				__( 'Email "%s" sent.', 'woocommerce' ),
+				$email_label
+			);
+		} elseif ( $error_reason ) {
+			$note = sprintf(
+				/* translators: 1: Email title or type identifier 2: Error reason */
+				__( 'Email "%1$s" failed to send: %2$s', 'woocommerce' ),
+				$email_label,
+				$error_reason
+			);
+		} else {
+			$note = sprintf(
+				/* translators: %s: Email title or type identifier */
+				__( 'Email "%s" failed to send.', 'woocommerce' ),
+				$email_label
+			);
+		}
+
+		$wc_object->add_order_note( $note, 0, false, array( 'note_group' => OrderNoteGroup::EMAIL_NOTIFICATION ) );
 	}
 
 	/**

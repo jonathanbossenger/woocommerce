@@ -4,6 +4,7 @@ declare( strict_types = 1 );
 namespace Automattic\WooCommerce\Tests\Internal\Email;
 
 use Automattic\WooCommerce\Internal\Email\EmailLogger;
+use Automattic\WooCommerce\Internal\Orders\OrderNoteGroup;
 use Automattic\WooCommerce\RestApi\UnitTests\LoggerSpyTrait;
 use WC_Unit_Test_Case;
 
@@ -270,6 +271,90 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$this->sut->handle_woocommerce_email_sent( true, 'new_order', $email );
 
 		$this->assertLogged( 'info', 'new_order', array( 'custom_key' => 'custom_value' ) );
+	}
+
+	/**
+	 * @testdox An order note is added when an email is sent successfully for an order.
+	 */
+	public function test_order_note_added_on_successful_send_for_order(): void {
+		$order = $this->createMock( \WC_Order::class );
+		$order->method( 'get_id' )->willReturn( 42 );
+		$order->expects( $this->once() )
+			->method( 'add_order_note' )
+			->with(
+				$this->stringContains( 'sent' ),
+				0,
+				false,
+				$this->callback( fn( $meta ) => isset( $meta['note_group'] ) && OrderNoteGroup::EMAIL_NOTIFICATION === $meta['note_group'] )
+			);
+
+		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com', $order );
+		$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
+	}
+
+	/**
+	 * @testdox An order note is added when an email fails to send for an order.
+	 */
+	public function test_order_note_added_on_failed_send_for_order(): void {
+		$order = $this->createMock( \WC_Order::class );
+		$order->method( 'get_id' )->willReturn( 42 );
+		$order->expects( $this->once() )
+			->method( 'add_order_note' )
+			->with(
+				$this->stringContains( 'failed' ),
+				0,
+				false,
+				$this->callback( fn( $meta ) => isset( $meta['note_group'] ) && OrderNoteGroup::EMAIL_NOTIFICATION === $meta['note_group'] )
+			);
+
+		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com', $order );
+		$this->sut->handle_woocommerce_email_sent( false, 'customer_processing_order', $email );
+	}
+
+	/**
+	 * @testdox The order note for a failed send includes the error reason.
+	 */
+	public function test_order_note_failure_includes_error_reason(): void {
+		$order = $this->createMock( \WC_Order::class );
+		$order->method( 'get_id' )->willReturn( 42 );
+		$order->expects( $this->once() )
+			->method( 'add_order_note' )
+			->with( $this->stringContains( 'SMTP connect() failed' ) );
+
+		$error = new \WP_Error( 'wp_mail_failed', 'SMTP connect() failed' );
+		$this->sut->capture_mail_error( $error );
+
+		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com', $order );
+		$this->sut->handle_woocommerce_email_sent( false, 'customer_processing_order', $email );
+	}
+
+	/**
+	 * @testdox No order note is added when the email is not associated with an order.
+	 */
+	public function test_no_order_note_for_non_order_object(): void {
+		$product = $this->createMock( \WC_Product::class );
+		$product->method( 'get_id' )->willReturn( 10 );
+
+		$email = $this->create_mock_email( 'some_product_email', 'admin@example.com', $product );
+
+		// Should complete without throwing – product objects do not get order notes.
+		$this->sut->handle_woocommerce_email_sent( true, 'some_product_email', $email );
+
+		$this->assertLogged( 'info', 'some_product_email' );
+	}
+
+	/**
+	 * @testdox No order note is added when logging is disabled by the filter.
+	 */
+	public function test_no_order_note_when_logging_disabled_by_filter(): void {
+		add_filter( 'woocommerce_email_log_enabled', '__return_false' );
+
+		$order = $this->createMock( \WC_Order::class );
+		$order->method( 'get_id' )->willReturn( 42 );
+		$order->expects( $this->never() )->method( 'add_order_note' );
+
+		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com', $order );
+		$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
 	}
 
 	/**
