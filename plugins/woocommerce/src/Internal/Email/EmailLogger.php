@@ -200,7 +200,7 @@ class EmailLogger implements RegisterHooksInterface {
 		/** This filter is documented in src/Internal/Email/EmailLogger.php */
 		$context = (array) apply_filters( 'woocommerce_email_log_context', $context, $email_id, $email );
 
-		wc_get_logger()->log( WC_Log_Levels::INFO, $message, $context );
+		wc_get_logger()->log( WC_Log_Levels::NOTICE, $message, $context );
 	}
 
 	/**

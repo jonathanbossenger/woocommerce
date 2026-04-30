@@ -287,14 +287,14 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	}
 
 	/**
-	 * @testdox Logs an info entry when email is disabled.
+	 * @testdox Logs a notice entry when email is disabled.
 	 */
-	public function test_logs_info_when_email_is_disabled(): void {
+	public function test_logs_notice_when_email_is_disabled(): void {
 		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com' );
 
 		$this->sut->handle_woocommerce_email_disabled( 'customer_processing_order', $email );
 
-		$this->assertLogged( 'info', 'customer_processing_order' );
+		$this->assertLogged( 'notice', 'customer_processing_order' );
 	}
 
 	/**
@@ -306,7 +306,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$this->sut->handle_woocommerce_email_disabled( 'new_order', $email );
 
 		$this->assertLogged(
-			'info',
+			'notice',
 			'new_order',
 			array(
 				'source'     => 'transactional-emails',
@@ -324,7 +324,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 
 		$this->sut->handle_woocommerce_email_disabled( 'new_order', $email );
 
-		$this->assertLogged( 'info', 'disabled' );
+		$this->assertLogged( 'notice', 'disabled' );
 	}
 
 	/**
@@ -340,14 +340,14 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	}
 
 	/**
-	 * @testdox Logs an info entry when email is skipped.
+	 * @testdox Logs a notice entry when email is skipped.
 	 */
-	public function test_logs_info_when_email_is_skipped(): void {
+	public function test_logs_notice_when_email_is_skipped(): void {
 		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com' );
 
 		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_NO_RECIPIENT, 'customer_processing_order', $email );
 
-		$this->assertLogged( 'info', 'customer_processing_order' );
+		$this->assertLogged( 'notice', 'customer_processing_order' );
 	}
 
 	/**
@@ -359,7 +359,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_ALREADY_SENT, 'new_order', $email );
 
 		$this->assertLogged(
-			'info',
+			'notice',
 			'new_order',
 			array(
 				'source'     => 'transactional-emails',
@@ -378,7 +378,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 
 		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_NO_RECIPIENT, 'new_order', $email );
 
-		$this->assertLogged( 'info', \WC_Email::SKIP_REASON_NO_RECIPIENT );
+		$this->assertLogged( 'notice', \WC_Email::SKIP_REASON_NO_RECIPIENT );
 	}
 
 	/**
@@ -404,7 +404,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$this->sut->handle_woocommerce_email_disabled( 'customer_processing_order', $email );
 
 		$this->assertLogged(
-			'info',
+			'notice',
 			'customer_processing_order',
 			array( 'order' => 99 )
 		);
@@ -421,7 +421,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_ALREADY_SENT, 'new_order', $email );
 
 		$this->assertLogged(
-			'info',
+			'notice',
 			'new_order',
 			array( 'order' => 77 )
 		);
