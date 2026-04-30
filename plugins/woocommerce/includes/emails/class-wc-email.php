@@ -40,14 +40,6 @@ class WC_Email extends WC_Settings_API {
 	public const SKIP_REASON_NO_RECIPIENT = 'no_recipient';
 
 	/**
-	 * Skip-reason identifier used when the email was already sent for this object
-	 * and a resend is not allowed.
-	 *
-	 * @since 10.8.0
-	 */
-	public const SKIP_REASON_ALREADY_SENT = 'already_sent';
-
-	/**
 	 * Email method ID.
 	 *
 	 * @var string
@@ -1167,7 +1159,6 @@ class WC_Email extends WC_Settings_API {
 			 *
 			 * The $reason parameter identifies why the email was not sent:
 			 * - WC_Email::SKIP_REASON_NO_RECIPIENT: No recipient address was available at send time.
-			 * - WC_Email::SKIP_REASON_ALREADY_SENT: The email was already sent for this object and resend is not allowed.
 			 *
 			 * @since 10.8.0
 			 *

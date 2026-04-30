@@ -120,8 +120,6 @@ if ( ! class_exists( 'WC_Email_New_Order' ) ) :
 			 * @param bool $allows Defaults to false.
 			 */
 			if ( $email_already_sent && ! apply_filters( 'woocommerce_new_order_email_allows_resend', false ) ) {
-				/** This action is documented in includes/emails/class-wc-email.php */
-				do_action( 'woocommerce_email_skipped', self::SKIP_REASON_ALREADY_SENT, $this->id, $this );
 				$this->restore_locale();
 				return;
 			}

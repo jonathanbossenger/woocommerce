@@ -356,7 +356,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	public function test_skipped_log_context_contains_skipped_status_and_reason(): void {
 		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
 
-		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_ALREADY_SENT, 'new_order', $email );
+		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_NO_RECIPIENT, 'new_order', $email );
 
 		$this->assertLogged(
 			'notice',
@@ -365,7 +365,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 				'source'     => 'transactional-emails',
 				'email_type' => 'new_order',
 				'status'     => 'skipped',
-				'reason'     => \WC_Email::SKIP_REASON_ALREADY_SENT,
+				'reason'     => \WC_Email::SKIP_REASON_NO_RECIPIENT,
 			)
 		);
 	}
@@ -418,7 +418,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$order->method( 'get_id' )->willReturn( 77 );
 		$email = $this->create_mock_email( 'new_order', 'admin@example.com', $order );
 
-		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_ALREADY_SENT, 'new_order', $email );
+		$this->sut->handle_woocommerce_email_skipped( \WC_Email::SKIP_REASON_NO_RECIPIENT, 'new_order', $email );
 
 		$this->assertLogged(
 			'notice',

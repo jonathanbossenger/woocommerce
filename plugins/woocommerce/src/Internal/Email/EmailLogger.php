@@ -142,7 +142,7 @@ class EmailLogger implements RegisterHooksInterface {
 	/**
 	 * Handle the woocommerce_email_skipped action.
 	 *
-	 * @param string   $reason   Short identifier for why the email was skipped (e.g. 'no_recipient', 'already_sent').
+	 * @param string   $reason   Short identifier for why the email was skipped (e.g. 'no_recipient').
 	 * @param string   $email_id The email type ID (e.g. `new_order`).
 	 * @param WC_Email $email    The WC_Email instance.
 	 * @return void
