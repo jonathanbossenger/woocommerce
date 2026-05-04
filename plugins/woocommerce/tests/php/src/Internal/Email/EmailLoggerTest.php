@@ -38,6 +38,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	public function tearDown(): void {
 		remove_all_filters( 'woocommerce_email_log_enabled' );
 		remove_all_filters( 'woocommerce_email_log_context' );
+		remove_all_filters( 'woocommerce_email_log_add_order_note' );
 		remove_action( 'woocommerce_email_sent', array( $this->sut, 'handle_woocommerce_email_sent' ) );
 		remove_action( 'wp_mail_failed', array( $this->sut, 'capture_mail_error' ) );
 		parent::tearDown();
@@ -293,7 +294,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	}
 
 	/**
-	 * @testdox An order note is added when an email fails to send for an order.
+	 * @testdox An order note is added when an email fails to send for an order (no error reason).
 	 */
 	public function test_order_note_added_on_failed_send_for_order(): void {
 		$order = $this->createMock( \WC_Order::class );
@@ -301,7 +302,10 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$order->expects( $this->once() )
 			->method( 'add_order_note' )
 			->with(
-				$this->stringContains( 'failed' ),
+				$this->logicalAnd(
+					$this->stringContains( 'failed to send.' ),
+					$this->logicalNot( $this->stringContains( 'failed to send:' ) )
+				),
 				0,
 				false,
 				$this->callback( fn( $meta ) => isset( $meta['note_group'] ) && OrderNoteGroup::EMAIL_NOTIFICATION === $meta['note_group'] )
@@ -312,14 +316,19 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	}
 
 	/**
-	 * @testdox The order note for a failed send includes the error reason.
+	 * @testdox The order note for a failed send includes the error reason in colon-form.
 	 */
 	public function test_order_note_failure_includes_error_reason(): void {
 		$order = $this->createMock( \WC_Order::class );
 		$order->method( 'get_id' )->willReturn( 42 );
 		$order->expects( $this->once() )
 			->method( 'add_order_note' )
-			->with( $this->stringContains( 'SMTP connect() failed' ) );
+			->with(
+				$this->logicalAnd(
+					$this->stringContains( 'failed to send:' ),
+					$this->stringContains( 'SMTP connect() failed' )
+				)
+			);
 
 		$error = new \WP_Error( 'wp_mail_failed', 'SMTP connect() failed' );
 		$this->sut->capture_mail_error( $error );
@@ -355,6 +364,23 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 
 		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com', $order );
 		$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
+	}
+
+	/**
+	 * @testdox woocommerce_email_log_add_order_note filter can suppress the order note independently of logging.
+	 */
+	public function test_order_note_suppressed_by_add_order_note_filter(): void {
+		add_filter( 'woocommerce_email_log_add_order_note', '__return_false' );
+
+		$order = $this->createMock( \WC_Order::class );
+		$order->method( 'get_id' )->willReturn( 42 );
+		$order->expects( $this->never() )->method( 'add_order_note' );
+
+		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com', $order );
+		$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
+
+		// Logger entry should still be written even though the note is suppressed.
+		$this->assertLogged( 'info', 'customer_processing_order' );
 	}
 
 	/**

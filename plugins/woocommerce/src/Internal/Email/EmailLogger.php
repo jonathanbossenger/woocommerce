@@ -137,15 +137,32 @@ class EmailLogger implements RegisterHooksInterface {
 	 * This makes the email event directly visible on the order admin page, supplementing
 	 * the WooCommerce logger entry with a record that is associated with the order itself.
 	 *
-	 * @param mixed    $wc_object    The email's related object, or false/null when none is set.
-	 * @param string   $email_id     The email type ID (e.g. `customer_processing_order`).
-	 * @param WC_Email $email        The WC_Email instance.
-	 * @param bool     $success      Whether the email was sent successfully.
-	 * @param string|null $error_reason The error message from wp_mail_failed, or null.
+	 * @param WC_Order|WC_Product|WP_User|false|null $wc_object The email's related object, or false/null when none is set.
+	 * @param string                                  $email_id     The email type ID (e.g. `customer_processing_order`).
+	 * @param WC_Email                                $email        The WC_Email instance.
+	 * @param bool                                    $success      Whether the email was sent successfully.
+	 * @param string|null                             $error_reason The error message from wp_mail_failed, or null.
 	 * @return void
 	 */
 	private function maybe_add_order_note( $wc_object, string $email_id, WC_Email $email, bool $success, ?string $error_reason ): void {
 		if ( ! $wc_object instanceof WC_Order ) {
+			return;
+		}
+
+		/**
+		 * Filter whether to add an order note for this transactional email attempt.
+		 *
+		 * Return false to suppress the order note for a particular email or globally,
+		 * while still allowing the WooCommerce logger entry to be written.
+		 *
+		 * @since 10.8.0
+		 *
+		 * @param bool     $enabled  Whether to add the order note.
+		 * @param string   $email_id The email type ID.
+		 * @param WC_Email $email    The WC_Email instance.
+		 * @param WC_Order $order    The order the note would be added to.
+		 */
+		if ( ! apply_filters( 'woocommerce_email_log_add_order_note', true, $email_id, $email, $wc_object ) ) {
 			return;
 		}
 
