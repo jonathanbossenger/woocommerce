@@ -155,7 +155,7 @@ class EmailLogger implements RegisterHooksInterface {
 		 * Return false to suppress the order note for a particular email or globally,
 		 * while still allowing the WooCommerce logger entry to be written.
 		 *
-		 * @since 10.8.0
+		 * @since 10.9.0
 		 *
 		 * @param bool     $enabled  Whether to add the order note.
 		 * @param string   $email_id The email type ID.
@@ -176,8 +176,8 @@ class EmailLogger implements RegisterHooksInterface {
 			);
 		} elseif ( $error_reason ) {
 			$note = sprintf(
-				/* translators: 1: Email title or type identifier 2: Error reason */
-				__( 'Email "%1$s" failed to send: %2$s', 'woocommerce' ),
+				/* translators: 1: Email title or type identifier, 2: Error reason */
+				__( 'Email "%1$s" failed to send: %2$s.', 'woocommerce' ),
 				$email_label,
 				$error_reason
 			);
