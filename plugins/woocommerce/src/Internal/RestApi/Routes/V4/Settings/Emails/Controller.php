@@ -50,7 +50,8 @@ class Controller extends AbstractController {
 	/**
 	 * Initialize the controller.
 	 *
-	 * @param EmailsSettingsSchema $schema Schema class.
+	 * @param EmailsSettingsSchema $schema                Schema class.
+	 * @param EmailHealthDetector  $email_health_detector Email health detector.
 	 * @internal
 	 */
 	final public function init( EmailsSettingsSchema $schema, EmailHealthDetector $email_health_detector ) {
@@ -82,6 +83,19 @@ class Controller extends AbstractController {
 			)
 		);
 
+		// Health detection endpoint.
+		register_rest_route(
+			$this->namespace,
+			'/' . $this->rest_base . '/health',
+			array(
+				array(
+					'methods'             => WP_REST_Server::READABLE,
+					'callback'            => array( $this, 'get_health' ),
+					'permission_callback' => array( $this, 'get_items_permissions_check' ),
+				),
+			)
+		);
+
 		// Single item endpoint.
 		register_rest_route(
 			$this->namespace,
@@ -108,18 +122,6 @@ class Controller extends AbstractController {
 			)
 		);
 
-		// Health detection endpoint.
-		register_rest_route(
-			$this->namespace,
-			'/' . $this->rest_base . '/health',
-			array(
-				array(
-					'methods'             => WP_REST_Server::READABLE,
-					'callback'            => array( $this, 'get_health' ),
-					'permission_callback' => array( $this, 'get_items_permissions_check' ),
-				),
-			)
-		);
 	}
 
 	/**
