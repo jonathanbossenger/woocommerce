@@ -12,6 +12,7 @@ declare( strict_types=1 );
 namespace Automattic\WooCommerce\Internal\RestApi\Routes\V4\Settings\Emails;
 
 use WP_Error;
+use Automattic\WooCommerce\Internal\Email\EmailHealthDetector;
 use Automattic\WooCommerce\Internal\RestApi\Routes\V4\AbstractController;
 use Automattic\WooCommerce\Internal\RestApi\Routes\V4\Settings\Emails\Schema\EmailsSettingsSchema;
 use WC_Emails;
@@ -40,13 +41,21 @@ class Controller extends AbstractController {
 	protected $schema;
 
 	/**
+	 * Email health detector.
+	 *
+	 * @var EmailHealthDetector
+	 */
+	protected $email_health_detector;
+
+	/**
 	 * Initialize the controller.
 	 *
 	 * @param EmailsSettingsSchema $schema Schema class.
 	 * @internal
 	 */
 	final public function init( EmailsSettingsSchema $schema ) {
-		$this->schema = $schema;
+		$this->schema                = $schema;
+		$this->email_health_detector = new EmailHealthDetector();
 	}
 
 	/**
@@ -96,6 +105,19 @@ class Controller extends AbstractController {
 					'args'                => $this->get_endpoint_args_for_item_schema( WP_REST_Server::EDITABLE ),
 				),
 				'schema' => array( $this, 'get_item_schema' ),
+			)
+		);
+
+		// Health detection endpoint.
+		register_rest_route(
+			$this->namespace,
+			'/' . $this->rest_base . '/health',
+			array(
+				array(
+					'methods'             => WP_REST_Server::READABLE,
+					'callback'            => array( $this, 'get_health' ),
+					'permission_callback' => array( $this, 'get_items_permissions_check' ),
+				),
 			)
 		);
 	}
@@ -203,6 +225,19 @@ class Controller extends AbstractController {
 				array( 'status' => 500 )
 			);
 		}
+	}
+
+	/**
+	 * Get recent transactional email health detections.
+	 *
+	 * @return WP_REST_Response
+	 */
+	public function get_health(): WP_REST_Response {
+		return rest_ensure_response(
+			array(
+				'issues' => $this->email_health_detector->detect_suspicious_gaps(),
+			)
+		);
 	}
 
 	/**
