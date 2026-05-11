@@ -87,6 +87,6 @@ class EmailHealthDetectorTest extends WC_Unit_Test_Case {
 			array( 31, 32 )
 		);
 
-		$this->assertSame( array(), $issues );
+		$this->assertEmpty( $issues );
 	}
 }

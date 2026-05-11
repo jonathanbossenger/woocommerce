@@ -16,7 +16,27 @@ class EmailHealthDetector {
 	/**
 	 * Log source for transactional email activity.
 	 */
-	private const LOG_SOURCE = 'transactional-emails';
+	private const TRANSACTIONAL_EMAIL_LOG_SOURCE = 'transactional-emails';
+
+	/**
+	 * Message pattern marking failed sends.
+	 */
+	private const FAILED_PATTERN = ' failed to send';
+
+	/**
+	 * Message pattern marking non-send outcomes.
+	 */
+	private const NOT_SENT_PATTERN = ' not sent:';
+
+	/**
+	 * Message pattern marking disabled non-send outcomes.
+	 */
+	private const DISABLED_PATTERN = 'email type is disabled';
+
+	/**
+	 * Message pattern marking successful sends.
+	 */
+	private const SENT_PATTERN = ' sent';
 
 	/**
 	 * Detection window in seconds.
@@ -37,6 +57,16 @@ class EmailHealthDetector {
 	 * Failure ratio threshold considered suspicious.
 	 */
 	private const HIGH_FAILURE_RATIO = 0.5;
+
+	/**
+	 * Maximum number of lines read from one log file during one detection pass.
+	 */
+	private const MAX_LOG_LINES_PER_FILE = 5000;
+
+	/**
+	 * Maximum number of recent orders inspected during one detection pass.
+	 */
+	private const MAX_RECENT_ORDERS = 500;
 
 	/**
 	 * Detect suspicious transactional email gaps from recent activity.
@@ -113,24 +143,7 @@ class EmailHealthDetector {
 			);
 		}
 
-		$successful_customer_order_ids = array_unique(
-			array_map(
-				'intval',
-				array_filter(
-					array_map(
-						function( array $event ) {
-							$email_type = (string) ( $event['email_type'] ?? '' );
-							$order_id   = (int) ( $event['order_id'] ?? 0 );
-							if ( str_starts_with( $email_type, 'customer_' ) && $order_id > 0 ) {
-								return $order_id;
-							}
-							return 0;
-						},
-						$sent_events
-					)
-				)
-			)
-		);
+		$successful_customer_order_ids = $this->extract_successful_customer_order_ids( $sent_events );
 
 		$missing_customer_email_order_ids = array_values(
 			array_diff(
@@ -161,13 +174,12 @@ class EmailHealthDetector {
 	 * @return array[]
 	 */
 	private function collect_recent_email_events( int $window_start ): array {
-		$events        = array();
-		$log_files     = \WC_Log_Handler_File::get_log_files();
-		$log_dir       = trailingslashit( LoggingUtil::get_log_directory() );
-		$source_prefix = self::LOG_SOURCE;
+		$events    = array();
+		$log_files = \WC_Log_Handler_File::get_log_files();
+		$log_dir   = trailingslashit( LoggingUtil::get_log_directory() );
 
 		foreach ( $log_files as $filename ) {
-			if ( ! str_starts_with( $filename, $source_prefix ) ) {
+			if ( 0 !== strpos( $filename, self::TRANSACTIONAL_EMAIL_LOG_SOURCE ) ) {
 				continue;
 			}
 
@@ -175,13 +187,16 @@ class EmailHealthDetector {
 			if ( ! is_readable( $path ) ) {
 				continue;
 			}
-			if ( filemtime( $path ) < $window_start ) {
-				continue;
-			}
 
 			$file = new \SplFileObject( $path, 'r' );
+			$lines_read = 0;
 			while ( ! $file->eof() ) {
+				if ( $lines_read >= self::MAX_LOG_LINES_PER_FILE ) {
+					break;
+				}
+
 				$line = trim( (string) $file->fgets() );
+				++$lines_read;
 				if ( '' === $line ) {
 					continue;
 				}
@@ -216,15 +231,18 @@ class EmailHealthDetector {
 			'order_id'   => 0,
 		);
 
-		if ( preg_match( '/^(\S+)\s+[A-Z]+\s+/', $line, $timestamp_match ) ) {
-			$event['timestamp'] = (int) strtotime( $timestamp_match[1] );
+		if ( preg_match( '/^(\S+)\s+[A-Za-z]+\s+/', $line, $timestamp_match ) ) {
+			$timestamp = strtotime( $timestamp_match[1] );
+			if ( false !== $timestamp ) {
+				$event['timestamp'] = (int) $timestamp;
+			}
 		}
 
 		$context_marker = ' CONTEXT: ';
 		$marker_offset  = strpos( $line, $context_marker );
 		if ( false !== $marker_offset ) {
 			$context = json_decode( substr( $line, $marker_offset + strlen( $context_marker ) ), true );
-			if ( is_array( $context ) ) {
+			if ( JSON_ERROR_NONE === json_last_error() && is_array( $context ) ) {
 				$event['email_type'] = isset( $context['email_type'] ) ? (string) $context['email_type'] : '';
 				$event['status']     = isset( $context['status'] ) ? (string) $context['status'] : '';
 				$event['order_id']   = isset( $context['order'] ) ? (int) $context['order'] : 0;
@@ -240,11 +258,11 @@ class EmailHealthDetector {
 		}
 
 		if ( '' === $event['status'] ) {
-			if ( str_contains( $line, ' failed to send' ) ) {
+			if ( false !== strpos( $line, self::FAILED_PATTERN ) ) {
 				$event['status'] = 'failed';
-			} elseif ( str_contains( $line, ' not sent:' ) ) {
-				$event['status'] = str_contains( $line, 'email type is disabled' ) ? 'disabled' : 'skipped';
-			} elseif ( str_contains( $line, ' sent' ) ) {
+			} elseif ( false !== strpos( $line, self::NOT_SENT_PATTERN ) ) {
+				$event['status'] = false !== strpos( $line, self::DISABLED_PATTERN ) ? 'disabled' : 'skipped';
+			} elseif ( false !== strpos( $line, self::SENT_PATTERN ) ) {
 				$event['status'] = 'sent';
 			}
 		}
@@ -263,10 +281,18 @@ class EmailHealthDetector {
 			return array();
 		}
 
+		$max_recent_orders = (int) apply_filters(
+			'woocommerce_email_health_detector_max_recent_orders',
+			self::MAX_RECENT_ORDERS
+		);
+		if ( $max_recent_orders < 1 ) {
+			$max_recent_orders = self::MAX_RECENT_ORDERS;
+		}
+
 		$order_ids = wc_get_orders(
 			array(
 				'return'       => 'ids',
-				'limit'        => 200,
+				'limit'        => $max_recent_orders,
 				'orderby'      => 'date',
 				'order'        => 'DESC',
 				'date_created' => '>' . gmdate( 'Y-m-d H:i:s', $window_start ),
@@ -280,6 +306,77 @@ class EmailHealthDetector {
 		return array_values(
 			array_unique(
 				array_map( 'intval', $order_ids )
+			)
+		);
+	}
+
+	/**
+	 * Extract order IDs with successful customer email sends.
+	 *
+	 * @param array[] $sent_events Recent sent events.
+	 * @return int[]
+	 */
+	private function extract_successful_customer_order_ids( array $sent_events ): array {
+		$order_ids = array();
+
+		foreach ( $sent_events as $event ) {
+			$email_type = (string) ( $event['email_type'] ?? '' );
+			$order_id   = (int) ( $event['order_id'] ?? 0 );
+
+			if ( $order_id > 0 && $this->is_customer_email_type( $email_type ) ) {
+				$order_ids[] = $order_id;
+			}
+		}
+
+		return array_values(
+			array_unique(
+				array_map( 'intval', $order_ids )
+			)
+		);
+	}
+
+	/**
+	 * Determine whether an email type is customer-facing.
+	 *
+	 * @param string $email_type Email type ID.
+	 * @return bool
+	 */
+	private function is_customer_email_type( string $email_type ): bool {
+		$customer_email_ids = $this->get_customer_email_ids();
+		if ( ! empty( $customer_email_ids ) ) {
+			return in_array( $email_type, $customer_email_ids, true );
+		}
+
+		return 0 === strpos( $email_type, 'customer_' );
+	}
+
+	/**
+	 * Get customer-facing transactional email IDs.
+	 *
+	 * @return string[]
+	 */
+	private function get_customer_email_ids(): array {
+		if ( ! function_exists( 'WC' ) || ! WC() || ! WC()->mailer() ) {
+			return array();
+		}
+
+		$emails = WC()->mailer()->get_emails();
+		if ( ! is_array( $emails ) ) {
+			return array();
+		}
+
+		return array_values(
+			array_filter(
+				array_map(
+					function( $email ) {
+						if ( ! $email instanceof \WC_Email || ! method_exists( $email, 'is_customer_email' ) || ! $email->is_customer_email() ) {
+							return '';
+						}
+
+						return (string) ( $email->id ?? '' );
+					},
+					$emails
+				)
 			)
 		);
 	}
