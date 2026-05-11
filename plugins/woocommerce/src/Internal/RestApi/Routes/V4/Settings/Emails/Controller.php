@@ -53,9 +53,9 @@ class Controller extends AbstractController {
 	 * @param EmailsSettingsSchema $schema Schema class.
 	 * @internal
 	 */
-	final public function init( EmailsSettingsSchema $schema ) {
+	final public function init( EmailsSettingsSchema $schema, ?EmailHealthDetector $email_health_detector = null ) {
 		$this->schema                = $schema;
-		$this->email_health_detector = new EmailHealthDetector();
+		$this->email_health_detector = $email_health_detector ?? new EmailHealthDetector();
 	}
 
 	/**

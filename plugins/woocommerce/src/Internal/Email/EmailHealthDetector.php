@@ -121,7 +121,7 @@ class EmailHealthDetector {
 						function( array $event ) {
 							$email_type = (string) ( $event['email_type'] ?? '' );
 							$order_id   = (int) ( $event['order_id'] ?? 0 );
-							if ( 0 === strpos( $email_type, 'customer_' ) && $order_id > 0 ) {
+							if ( str_starts_with( $email_type, 'customer_' ) && $order_id > 0 ) {
 								return $order_id;
 							}
 							return 0;
@@ -167,7 +167,7 @@ class EmailHealthDetector {
 		$source_prefix = self::LOG_SOURCE;
 
 		foreach ( $log_files as $filename ) {
-			if ( 0 !== strpos( $filename, $source_prefix ) ) {
+			if ( ! str_starts_with( $filename, $source_prefix ) ) {
 				continue;
 			}
 
@@ -240,11 +240,11 @@ class EmailHealthDetector {
 		}
 
 		if ( '' === $event['status'] ) {
-			if ( false !== strpos( $line, ' failed to send' ) ) {
+			if ( str_contains( $line, ' failed to send' ) ) {
 				$event['status'] = 'failed';
-			} elseif ( false !== strpos( $line, ' not sent:' ) ) {
-				$event['status'] = false !== strpos( $line, 'email type is disabled' ) ? 'disabled' : 'skipped';
-			} elseif ( false !== strpos( $line, ' sent' ) ) {
+			} elseif ( str_contains( $line, ' not sent:' ) ) {
+				$event['status'] = str_contains( $line, 'email type is disabled' ) ? 'disabled' : 'skipped';
+			} elseif ( str_contains( $line, ' sent' ) ) {
 				$event['status'] = 'sent';
 			}
 		}
