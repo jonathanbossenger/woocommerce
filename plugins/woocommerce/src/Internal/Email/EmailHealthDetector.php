@@ -35,8 +35,15 @@ class EmailHealthDetector {
 
 	/**
 	 * Message pattern marking successful sends.
+	 *
+	 * Matches the EmailLogger success format:
+	 * - Email "<email_type>" sent
+	 * - Email "<email_type>" for <object_type> #<id> sent
+	 *
+	 * The optional object type segment allows namespaced class labels (backslashes),
+	 * which may appear for non-order/product/user object contexts.
 	 */
-	private const SENT_MESSAGE_PATTERN = '/Email "([^"]+)"(?: for [A-Za-z_\\\\]+ #\d+)? sent(?:\s|$)/';
+	private const SENT_MESSAGE_PATTERN = '/Email "[^"]+"(?: for [A-Za-z_\\\\]+ #\d+)? sent(?:\s|$)/';
 
 	/**
 	 * Detection window in seconds.
@@ -104,13 +111,21 @@ class EmailHealthDetector {
 		$recent_orders  = $this->collect_recent_order_ids( $window_start );
 		$issues         = $this->build_detections( $recent_events, $recent_orders );
 
-		$cache_ttl = (int) apply_filters(
+		/**
+		 * Filter the cache TTL for email health detection results.
+		 *
+		 * @since 10.9.0
+		 *
+		 * @param int $cache_ttl Cache duration, in seconds.
+		 */
+		$cache_ttl = apply_filters(
 			'woocommerce_email_health_detector_cache_ttl',
 			self::HEALTH_ISSUES_TRANSIENT_TTL
 		);
-		if ( $cache_ttl < 1 ) {
-			$cache_ttl = self::HEALTH_ISSUES_TRANSIENT_TTL;
-		}
+
+		$cache_ttl = ( ! is_numeric( $cache_ttl ) || (int) $cache_ttl < 1 )
+			? self::HEALTH_ISSUES_TRANSIENT_TTL
+			: (int) $cache_ttl;
 
 		set_transient( self::HEALTH_ISSUES_TRANSIENT_KEY, $issues, $cache_ttl );
 		$this->request_cached_issues = $issues;
@@ -225,7 +240,7 @@ class EmailHealthDetector {
 				continue;
 			}
 			$modified_time = filemtime( $path );
-			if ( false === $modified_time || (int) $modified_time < $window_start ) {
+			if ( false === $modified_time || $modified_time < $window_start ) {
 				continue;
 			}
 
