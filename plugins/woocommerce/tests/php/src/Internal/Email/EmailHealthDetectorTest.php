@@ -76,6 +76,44 @@ class EmailHealthDetectorTest extends WC_Unit_Test_Case {
 	}
 
 	/**
+	 * @testdox Detects high recent failure ratio at the minimum attempts threshold.
+	 */
+	public function test_detects_high_recent_failure_ratio_at_min_attempts_threshold(): void {
+		$issues = $this->sut->build_detections(
+			array(
+				array( 'status' => 'failed', 'email_type' => 'customer_processing_order', 'order_id' => 301 ),
+				array( 'status' => 'failed', 'email_type' => 'customer_processing_order', 'order_id' => 302 ),
+				array( 'status' => 'failed', 'email_type' => 'customer_processing_order', 'order_id' => 303 ),
+				array( 'status' => 'sent', 'email_type' => 'customer_processing_order', 'order_id' => 304 ),
+				array( 'status' => 'sent', 'email_type' => 'customer_processing_order', 'order_id' => 305 ),
+			),
+			array()
+		);
+
+		$codes = array_column( $issues, 'code' );
+		$this->assertContains( 'high_recent_failure_ratio', $codes );
+	}
+
+	/**
+	 * @testdox Does not detect high recent failure ratio when just under threshold.
+	 */
+	public function test_does_not_detect_high_recent_failure_ratio_just_under_threshold(): void {
+		$issues = $this->sut->build_detections(
+			array(
+				array( 'status' => 'failed', 'email_type' => 'customer_processing_order', 'order_id' => 311 ),
+				array( 'status' => 'failed', 'email_type' => 'customer_processing_order', 'order_id' => 312 ),
+				array( 'status' => 'sent', 'email_type' => 'customer_processing_order', 'order_id' => 313 ),
+				array( 'status' => 'sent', 'email_type' => 'customer_processing_order', 'order_id' => 314 ),
+				array( 'status' => 'sent', 'email_type' => 'customer_processing_order', 'order_id' => 315 ),
+			),
+			array()
+		);
+
+		$codes = array_column( $issues, 'code' );
+		$this->assertNotContains( 'high_recent_failure_ratio', $codes );
+	}
+
+	/**
 	 * @testdox Returns no detections for healthy recent activity.
 	 */
 	public function test_returns_empty_for_healthy_activity(): void {

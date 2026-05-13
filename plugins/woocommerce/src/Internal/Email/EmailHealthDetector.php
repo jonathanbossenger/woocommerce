@@ -36,7 +36,7 @@ class EmailHealthDetector {
 	/**
 	 * Message pattern marking successful sends.
 	 */
-	private const SENT_PATTERN = ' sent';
+	private const SENT_MESSAGE_PATTERN = '/Email "([^"]+)"(?: for [A-Za-z_\\\\]+ #\d+)? sent(?:\s|$)/';
 
 	/**
 	 * Detection window in seconds.
@@ -69,16 +69,53 @@ class EmailHealthDetector {
 	private const MAX_RECENT_ORDERS = 500;
 
 	/**
+	 * Cache key for health detections.
+	 */
+	private const HEALTH_ISSUES_TRANSIENT_KEY = 'woocommerce_email_health_detector_issues';
+
+	/**
+	 * Cache duration for health detections (seconds).
+	 */
+	private const HEALTH_ISSUES_TRANSIENT_TTL = 300;
+
+	/**
+	 * In-request cache for the most recent detection result.
+	 */
+	private ?array $request_cached_issues = null;
+
+	/**
 	 * Detect suspicious transactional email gaps from recent activity.
 	 *
 	 * @return array[] Detection results.
 	 */
 	public function detect_suspicious_gaps(): array {
+		if ( null !== $this->request_cached_issues ) {
+			return $this->request_cached_issues;
+		}
+
+		$cached_issues = get_transient( self::HEALTH_ISSUES_TRANSIENT_KEY );
+		if ( is_array( $cached_issues ) ) {
+			$this->request_cached_issues = $cached_issues;
+			return $cached_issues;
+		}
+
 		$window_start   = time() - self::DETECTION_WINDOW;
 		$recent_events  = $this->collect_recent_email_events( $window_start );
 		$recent_orders  = $this->collect_recent_order_ids( $window_start );
+		$issues         = $this->build_detections( $recent_events, $recent_orders );
 
-		return $this->build_detections( $recent_events, $recent_orders );
+		$cache_ttl = (int) apply_filters(
+			'woocommerce_email_health_detector_cache_ttl',
+			self::HEALTH_ISSUES_TRANSIENT_TTL
+		);
+		if ( $cache_ttl < 1 ) {
+			$cache_ttl = self::HEALTH_ISSUES_TRANSIENT_TTL;
+		}
+
+		set_transient( self::HEALTH_ISSUES_TRANSIENT_KEY, $issues, $cache_ttl );
+		$this->request_cached_issues = $issues;
+
+		return $issues;
 	}
 
 	/**
@@ -187,6 +224,10 @@ class EmailHealthDetector {
 			if ( ! is_readable( $path ) ) {
 				continue;
 			}
+			$modified_time = filemtime( $path );
+			if ( false === $modified_time || (int) $modified_time < $window_start ) {
+				continue;
+			}
 
 			$file = new \SplFileObject( $path, 'r' );
 			$lines_read = 0;
@@ -262,7 +303,7 @@ class EmailHealthDetector {
 				$event['status'] = 'failed';
 			} elseif ( false !== strpos( $line, self::NOT_SENT_PATTERN ) ) {
 				$event['status'] = false !== strpos( $line, self::DISABLED_PATTERN ) ? 'disabled' : 'skipped';
-			} elseif ( false !== strpos( $line, self::SENT_PATTERN ) ) {
+			} elseif ( 1 === preg_match( self::SENT_MESSAGE_PATTERN, $line ) ) {
 				$event['status'] = 'sent';
 			}
 		}
