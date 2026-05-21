@@ -133,15 +133,17 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$user  = self::factory()->user->create_and_get( array( 'user_email' => 'registered@example.com' ) );
 		$email = $this->create_mock_email( 'customer_processing_order', 'registered@example.com' );
 
-		$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
+		try {
+			$this->sut->handle_woocommerce_email_sent( true, 'customer_processing_order', $email );
 
-		$context = $this->captured_logs[0]['context'];
+			$context = $this->captured_logs[0]['context'];
 
-		$this->assertArrayHasKey( 'recipient', $context );
-		$this->assertSame( $user->user_login, $context['recipient'], 'Recipient should be the WordPress username for a registered user' );
-		$this->assertStringNotContainsString( 'registered@example.com', $context['recipient'], 'Raw email address should not appear in the log context' );
-
-		wp_delete_user( $user->ID );
+			$this->assertArrayHasKey( 'recipient', $context );
+			$this->assertSame( $user->user_login, $context['recipient'], 'Recipient should be the WordPress username for a registered user' );
+			$this->assertStringNotContainsString( 'registered@example.com', $context['recipient'], 'Raw email address should not appear in the log context' );
+		} finally {
+			wp_delete_user( $user->ID );
+		}
 	}
 
 	/**
@@ -181,6 +183,25 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$this->sut->handle_woocommerce_email_sent( false, 'new_order', $email );
 
 		$this->assertLogged( 'warning', 'SMTP connect() failed' );
+	}
+
+	/**
+	 * @testdox Failure message redacts email addresses embedded in the captured wp_mail_failed reason.
+	 */
+	public function test_failure_message_redacts_email_addresses_in_reason(): void {
+		$error = new \WP_Error(
+			'wp_mail_failed',
+			'SMTP Error: Could not send to customer@example.com (rejected by server.example.org).'
+		);
+		$this->sut->capture_mail_error( $error );
+
+		$email = $this->create_mock_email( 'new_order', 'admin@example.com' );
+		$this->sut->handle_woocommerce_email_sent( false, 'new_order', $email );
+
+		$log = $this->captured_logs[0];
+		$this->assertStringNotContainsString( 'customer@example.com', $log['message'], 'Raw recipient address must not appear in the logged message.' );
+		$this->assertStringNotContainsString( 'server.example.org', $log['message'], 'Domain-only host names should be left intact (only address-shaped tokens are redacted).' );
+		$this->assertStringContainsString( '[redacted_email]', $log['message'], 'Redacted addresses should be replaced with the [redacted_email] marker.' );
 	}
 
 	/**
@@ -241,6 +262,66 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 			'customer_new_account',
 			array( 'user' => 5 )
 		);
+	}
+
+	/**
+	 * @testdox Object with a get_id() requiring parameters falls back to the ID property.
+	 */
+	public function test_object_with_required_get_id_parameters_falls_back_to_id_property(): void {
+		$wc_object     = new class() {
+			/** @var int Mirrors WP_Post::$ID. */
+			public int $ID = 0; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- Mirrors WP_Post::$ID.
+
+			/**
+			 * get_id with a required parameter, which the logger guard should refuse to call.
+			 *
+			 * @param int $context Required parameter.
+			 * @return int
+			 */
+			public function get_id( int $context ): int {
+				return $context;
+			}
+		};
+		$wc_object->ID = 7;
+		$class_name    = get_class( $wc_object );
+		$email         = $this->create_mock_email( 'custom_email', 'customer@example.com', $wc_object );
+
+		$this->sut->handle_woocommerce_email_sent( true, 'custom_email', $email );
+
+		$context = $this->captured_logs[0]['context'];
+
+		$this->assertArrayHasKey( $class_name, $context );
+		$this->assertSame( 7, $context[ $class_name ] );
+	}
+
+	/**
+	 * @testdox Object whose get_id() throws does not break logging.
+	 */
+	public function test_object_with_throwing_get_id_does_not_break_logging(): void {
+		$wc_object     = new class() {
+			/** @var int Mirrors WP_Post::$ID. */
+			public int $ID = 0; // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- Mirrors WP_Post::$ID.
+
+			/**
+			 * get_id that always throws to simulate a misbehaving extension object.
+			 *
+			 * @return never
+			 * @throws \RuntimeException Always.
+			 */
+			public function get_id(): never {
+				throw new \RuntimeException( 'broken get_id' );
+			}
+		};
+		$wc_object->ID = 11;
+		$class_name    = get_class( $wc_object );
+		$email         = $this->create_mock_email( 'custom_email', 'customer@example.com', $wc_object );
+
+		$this->sut->handle_woocommerce_email_sent( true, 'custom_email', $email );
+
+		$context = $this->captured_logs[0]['context'];
+
+		$this->assertArrayHasKey( $class_name, $context );
+		$this->assertSame( 11, $context[ $class_name ] );
 	}
 
 	/**
@@ -345,6 +426,31 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 			);
 
 		$error = new \WP_Error( 'wp_mail_failed', 'SMTP connect() failed' );
+		$this->sut->capture_mail_error( $error );
+
+		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com', $order );
+		$this->sut->handle_woocommerce_email_sent( false, 'customer_processing_order', $email );
+	}
+
+	/**
+	 * @testdox The order note redacts email addresses embedded in the failure reason.
+	 */
+	public function test_order_note_failure_redacts_email_addresses_in_reason(): void {
+		$order = $this->createMock( \WC_Order::class );
+		$order->method( 'get_id' )->willReturn( 42 );
+		$order->expects( $this->once() )
+			->method( 'add_order_note' )
+			->with(
+				$this->logicalAnd(
+					$this->stringContains( '[redacted_email]' ),
+					$this->logicalNot( $this->stringContains( 'customer@example.com' ) )
+				)
+			);
+
+		$error = new \WP_Error(
+			'wp_mail_failed',
+			'SMTP Error: Could not send to customer@example.com (rejected by server.example.org).'
+		);
 		$this->sut->capture_mail_error( $error );
 
 		$email = $this->create_mock_email( 'customer_processing_order', 'customer@example.com', $order );
@@ -650,15 +756,26 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 	 */
 	private function create_testable_email( string $email_id, string $recipient, bool $is_enabled, bool $send_return = false ): object {
 		return new class( $email_id, $recipient, $is_enabled, $send_return ) extends \WC_Email {
-			/** @var bool */
+			/** @var bool Whether send() has been invoked. */
 			public bool $send_called = false;
-			/** @var array */
-			public array $send_args  = array();
+			/** @var array Arguments captured from the most recent send() call. */
+			public array $send_args = array();
 
+			/** @var string Recipient returned by get_recipient(). */
 			private string $test_recipient;
-			private bool   $test_is_enabled;
-			private bool   $test_send_return;
+			/** @var bool Value returned by is_enabled(). */
+			private bool $test_is_enabled;
+			/** @var bool Value returned by send(). */
+			private bool $test_send_return;
 
+			/**
+			 * Construct the test double.
+			 *
+			 * @param string $email_id    The email type ID to expose on the instance.
+			 * @param string $recipient   Recipient string for get_recipient().
+			 * @param bool   $is_enabled  Value to return from is_enabled().
+			 * @param bool   $send_return Value to return from send().
+			 */
 			public function __construct( string $email_id, string $recipient, bool $is_enabled, bool $send_return ) {
 				// Deliberately skip parent::__construct() to avoid side-effects in tests.
 				$this->id               = $email_id;
@@ -667,30 +784,58 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 				$this->test_send_return = $send_return;
 			}
 
+			/**
+			 * @return bool Configured is_enabled() return value.
+			 */
 			public function is_enabled(): bool {
 				return $this->test_is_enabled;
 			}
 
+			/**
+			 * @return string Configured recipient string.
+			 */
 			public function get_recipient(): string {
 				return $this->test_recipient;
 			}
 
+			/**
+			 * @return string Static test subject.
+			 */
 			public function get_subject(): string {
 				return 'Test subject';
 			}
 
+			/**
+			 * @return string Static test content.
+			 */
 			public function get_content(): string {
 				return 'Test content';
 			}
 
+			/**
+			 * @return string Empty headers string.
+			 */
 			public function get_headers(): string {
 				return '';
 			}
 
+			/**
+			 * @return array Empty attachments array.
+			 */
 			public function get_attachments(): array {
 				return array();
 			}
 
+			/**
+			 * Record the send() invocation and return the configured result.
+			 *
+			 * @param string $to          Recipient.
+			 * @param string $subject     Subject.
+			 * @param string $message     Body.
+			 * @param string $headers     Headers.
+			 * @param array  $attachments Attachments.
+			 * @return bool Configured send() return value.
+			 */
 			public function send( $to, $subject, $message, $headers, $attachments ): bool {
 				$this->send_called = true;
 				$this->send_args   = array( $to, $subject, $message, $headers, $attachments );
@@ -724,6 +869,7 @@ class EmailLoggerTest extends WC_Unit_Test_Case {
 		$email->id     = $email_id;
 		$email->object = $wc_object;
 		$email->expects( $this->any() )->method( 'get_recipient' )->willReturn( $recipient );
+		$email->expects( $this->any() )->method( 'get_title' )->willReturn( $email_id );
 
 		return $email;
 	}

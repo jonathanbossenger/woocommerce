@@ -20,7 +20,7 @@ use WP_User;
  * when the address is linked to an account, or as 'guest' for unrecognised addresses. Failure reasons are captured
  * from wp_mail_failed.
  *
- * @since 10.8.0
+ * @since 10.9.0
  * @internal
  */
 class EmailLogger implements RegisterHooksInterface {
@@ -52,10 +52,12 @@ class EmailLogger implements RegisterHooksInterface {
 	/**
 	 * Capture the PHPMailer error from a failed wp_mail() call so it can be included in the log entry.
 	 *
-	 * Note: wp_mail_failed is a global hook; any plugin's failed wp_mail() will fire it. In the unlikely
-	 * event that a non-WooCommerce wp_mail() failure fires between a WooCommerce send failure and the
-	 * woocommerce_email_sent action, its error message could overwrite the WooCommerce one. The post-send
-	 * reset of $last_mail_error keeps the window as narrow as possible.
+	 * Error attribution is best-effort: wp_mail_failed is a global hook, so any plugin's failed
+	 * wp_mail() call will set $last_mail_error. The trailing edge is controlled — $last_mail_error
+	 * is cleared immediately after each WooCommerce send — but the leading edge is unbounded: a
+	 * non-WooCommerce wp_mail_failed fired before a WooCommerce send failure will be attributed
+	 * to that WooCommerce send. This may produce misleading error reasons in stores where other
+	 * plugins also call wp_mail().
 	 *
 	 * @param WP_Error $error The error returned by wp_mail.
 	 * @return void
@@ -78,7 +80,7 @@ class EmailLogger implements RegisterHooksInterface {
 		 *
 		 * Return false to skip logging for a particular email or globally.
 		 *
-		 * @since 10.8.0
+		 * @since 10.9.0
 		 *
 		 * @param bool     $enabled  Whether logging is enabled.
 		 * @param string   $email_id The email type ID.
@@ -89,19 +91,11 @@ class EmailLogger implements RegisterHooksInterface {
 			return;
 		}
 
-		$object_context = $this->get_object_context( $email->object );
-		$object_label   = isset( $object_context['type'], $object_context['id'] )
+		$object_context  = $this->get_object_context( $email->object );
+		$object_label    = isset( $object_context['type'], $object_context['id'] )
 			? sprintf( ' for %s #%d', $object_context['type'], $object_context['id'] )
 			: '';
-
-		$error_reason = $this->last_mail_error;
-
-		if ( $success ) {
-			$message = sprintf( 'Email "%s"%s sent', $email_id, $object_label );
-		} else {
-			$reason  = $error_reason ? ': ' . $error_reason : '';
-			$message = sprintf( 'Email "%s"%s failed to send%s', $email_id, $object_label, $reason );
-		}
+		$last_mail_error = $this->last_mail_error;
 
 		$this->last_mail_error = null;
 
@@ -119,7 +113,7 @@ class EmailLogger implements RegisterHooksInterface {
 		/**
 		 * Filter the context array logged for each transactional email attempt.
 		 *
-		 * @since 10.8.0
+		 * @since 10.9.0
 		 *
 		 * @param array    $context  The context array to be logged.
 		 * @param string   $email_id The email type ID.
@@ -127,19 +121,25 @@ class EmailLogger implements RegisterHooksInterface {
 		 */
 		$context = (array) apply_filters( 'woocommerce_email_log_context', $context, $email_id, $email );
 
+		$type_label = ! empty( $context['is_test'] ) ? 'Test email' : 'Email';
+
+		if ( $success ) {
+			$message = sprintf( '%s "%s"%s sent', $type_label, $email_id, $object_label );
+		} else {
+			$reason  = $last_mail_error ? ': ' . $this->redact_emails( $last_mail_error ) : '';
+			$message = sprintf( '%s "%s"%s failed to send%s', $type_label, $email_id, $object_label, $reason );
+		}
+
 		$level = $success ? WC_Log_Levels::INFO : WC_Log_Levels::WARNING;
 		wc_get_logger()->log( $level, $message, $context );
 
-		$this->maybe_add_order_note( $email->object, $email_id, $email, $success, $error_reason );
+		$this->maybe_add_order_note( $email->object, $email_id, $email, (bool) $success, $last_mail_error );
 	}
 
 	/**
 	 * Add a private order note when a transactional email is sent or fails for an order.
 	 *
-	 * This makes the email event directly visible on the order admin page, supplementing
-	 * the WooCommerce logger entry with a record that is associated with the order itself.
-	 *
-	 * @param WC_Order|WC_Product|WP_User|false|null $wc_object The email's related object, or false/null when none is set.
+	 * @param WC_Order|WC_Product|WP_User|false|null $wc_object    The email's related object, or false/null when none is set.
 	 * @param string                                  $email_id     The email type ID (e.g. `customer_processing_order`).
 	 * @param WC_Email                                $email        The WC_Email instance.
 	 * @param bool                                    $success      Whether the email was sent successfully.
@@ -181,7 +181,7 @@ class EmailLogger implements RegisterHooksInterface {
 				/* translators: 1: Email title or type identifier, 2: Error reason */
 				__( 'Email "%1$s" failed to send: %2$s.', 'woocommerce' ),
 				$email_label,
-				$error_reason
+				$this->redact_emails( $error_reason )
 			);
 		} else {
 			$note = sprintf(
@@ -232,7 +232,13 @@ class EmailLogger implements RegisterHooksInterface {
 	 * @return void
 	 */
 	private function log_non_send_outcome( string $email_id, WC_Email $email, string $status, ?string $reason = null ): void {
-		/** This filter is documented in src/Internal/Email/EmailLogger.php */
+		/**
+		 * Filter whether to log this transactional email attempt.
+		 *
+		 * This filter is documented in src/Internal/Email/EmailLogger.php
+		 *
+		 * @since 10.9.0
+		 */
 		if ( ! apply_filters( 'woocommerce_email_log_enabled', true, $email_id, $email ) ) {
 			return;
 		}
@@ -263,7 +269,13 @@ class EmailLogger implements RegisterHooksInterface {
 			$context[ $object_context['type'] ] = $object_context['id'] ?? null;
 		}
 
-		/** This filter is documented in src/Internal/Email/EmailLogger.php */
+		/**
+		 * Filter the context array logged for each transactional email attempt.
+		 *
+		 * This filter is documented in src/Internal/Email/EmailLogger.php
+		 *
+		 * @since 10.9.0
+		 */
 		$context = (array) apply_filters( 'woocommerce_email_log_context', $context, $email_id, $email );
 
 		wc_get_logger()->log( WC_Log_Levels::NOTICE, $message, $context );
@@ -297,6 +309,26 @@ class EmailLogger implements RegisterHooksInterface {
 	}
 
 	/**
+	 * Replace any email addresses in a log message fragment with `[redacted_email]`.
+	 *
+	 * PHPMailer / SMTP error strings frequently embed the recipient address
+	 * (e.g. "SMTP Error: Could not send to foo@example.com"). Without redaction,
+	 * the address would be written into the log message and — when the database
+	 * log handler is active — surface in WC > Status > Logs to anyone with
+	 * `manage_woocommerce`, defeating the username/`guest` resolution applied
+	 * to the `recipient` context field.
+	 *
+	 * Mirrors the regex used by RemoteLogger::redact_user_data() so the privacy
+	 * posture stays consistent across loggers.
+	 *
+	 * @param string $message The message fragment to scrub.
+	 * @return string The fragment with any email addresses replaced.
+	 */
+	private function redact_emails( string $message ): string {
+		return (string) preg_replace( '/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/', '[redacted_email]', $message );
+	}
+
+	/**
 	 * Extract loggable context from the WooCommerce object attached to the email.
 	 *
 	 * Returns a stable short type identifier rather than the raw class name so that log aggregation
@@ -320,11 +352,33 @@ class EmailLogger implements RegisterHooksInterface {
 			$type = get_class( $wc_object );
 		}
 
-		if ( method_exists( $wc_object, 'get_id' ) ) {
+		$id = null;
+		if ( $wc_object instanceof WC_Order || $wc_object instanceof WC_Product ) {
+			// Both have an explicit get_id() — safe to call directly.
 			$id = (int) $wc_object->get_id();
-		} elseif ( property_exists( $wc_object, 'ID' ) ) {
+		} elseif ( $wc_object instanceof WP_User ) {
+			// WP_User has no get_id() method; __call() returns false for unknown methods,
+			// which casts to 0 and bypasses the ID-property fallback below.
 			$id = (int) $wc_object->ID;
-		} else {
+		} elseif ( method_exists( $wc_object, 'get_id' ) ) {
+			try {
+				$method = new \ReflectionMethod( $wc_object, 'get_id' );
+				if ( 0 === $method->getNumberOfRequiredParameters() ) {
+					$id = (int) $wc_object->get_id();
+				}
+			} catch ( \Throwable $e ) {
+				$id = null;
+			}
+		}
+
+		if ( null === $id ) {
+			$public_props = get_object_vars( $wc_object );
+			if ( array_key_exists( 'ID', $public_props ) ) {
+				$id = (int) $public_props['ID'];
+			}
+		}
+
+		if ( null === $id ) {
 			return array( 'type' => $type );
 		}
 
