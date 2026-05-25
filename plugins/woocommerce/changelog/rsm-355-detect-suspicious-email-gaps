@@ -1,0 +1,4 @@
+Significance: minor
+Type: enhancement
+
+Add transactional email health detection for suspicious gaps, including repeated local send failures, recent order activity without matching successful customer emails, and no successful recent sends despite store activity.

@@ -11,6 +11,7 @@ namespace Automattic\WooCommerce\Tests\Internal\RestApi\Routes\V4\Settings\Email
 
 use Automattic\WooCommerce\Internal\RestApi\Routes\V4\Settings\Emails\Controller;
 use Automattic\WooCommerce\Internal\RestApi\Routes\V4\Settings\Emails\Schema\EmailsSettingsSchema;
+use Automattic\WooCommerce\Internal\Email\EmailHealthDetector;
 use Automattic\WooCommerce\Internal\EmailEditor\WCTransactionalEmails\WCTransactionalEmailPostsGenerator;
 use Automattic\WooCommerce\EmailEditor\Email_Editor_Container;
 use Automattic\WooCommerce\EmailEditor\Engine\PersonalizationTags\Personalization_Tags_Registry;
@@ -98,7 +99,7 @@ class EmailsSettingsControllerTest extends WC_REST_Unit_Test_Case {
 		$controller = new Controller();
 		$schema     = new EmailsSettingsSchema();
 		$schema->init();
-		$controller->init( $schema );
+		$controller->init( $schema, new EmailHealthDetector() );
 		$controller->register_routes();
 
 		// Snapshot current option values to restore on tearDown.
@@ -151,6 +152,22 @@ class EmailsSettingsControllerTest extends WC_REST_Unit_Test_Case {
 		$routes = $this->server->get_routes();
 		$this->assertArrayHasKey( '/wc/v4/settings/emails', $routes );
 		$this->assertArrayHasKey( '/wc/v4/settings/emails/(?P<email_id>[\w-]+)', $routes );
+		$this->assertArrayHasKey( '/wc/v4/settings/emails/health', $routes );
+	}
+
+	/**
+	 * Test health endpoint returns issues collection.
+	 */
+	public function test_get_health_returns_issues_collection() {
+		wp_set_current_user( $this->user_id );
+		$request  = new WP_REST_Request( 'GET', '/wc/v4/settings/emails/health' );
+		$response = $this->server->dispatch( $request );
+		$data     = $response->get_data();
+
+		$this->assertEquals( 200, $response->get_status() );
+		$this->assertIsArray( $data );
+		$this->assertArrayHasKey( 'issues', $data );
+		$this->assertIsArray( $data['issues'] );
 	}
 
 	/**
